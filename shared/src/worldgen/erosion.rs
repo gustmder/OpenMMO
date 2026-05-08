@@ -1,283 +1,584 @@
-//! Phase 3: hydraulic erosion (particle-based droplet simulation).
+//! Phase 3: hydraulic erosion (dandrino simulation).
 //!
-//! Each droplet is a virtual water particle that starts at a random land
-//! cell, flows downhill under gradient + inertia, carries sediment, and
-//! either erodes or deposits material depending on its carrying capacity.
-//! Over hundreds of thousands of droplets this carves realistic valleys
-//! and drainage channels into the Phase 2 heightmap — the raw material
-//! from which Phase 4 will extract river polylines via flow accumulation.
+//! Faithful port of <https://github.com/dandrino/terrain-erosion-3-ways>
+//! `simulation.py`. Each iteration walks the whole grid through six
+//! sequential steps:
 //!
-//! Droplet step (per Sebastian Lague / Hans Beyer style):
-//!   1. Sample height + gradient bilinearly at current position.
-//!   2. Update velocity with inertia: `v = v·inertia − g·(1−inertia)`.
-//!   3. Move one unit along the normalized velocity.
-//!   4. Sediment capacity = `max(−Δh, min_slope) · |v| · water · factor`.
-//!   5. If over capacity or climbing a hill → deposit (bilinear at old pos).
-//!      Otherwise → erode around old pos with a radial brush; grow sediment.
-//!   6. Evaporate water; terminate if out of map, in sea, or stalled.
+//! 1. **Rain** — `water += U(0, rain_rate)` on every land cell.
+//! 2. **Gradient** — central-difference flow direction (downhill, unit
+//!    length); flat cells get a random direction so they still drain.
+//! 3. **Neighbor sample** — bilinear lookup of `terrain` at `cell + ĝ`;
+//!    `Δh = current − neighbor` is the local drop along the flow.
+//! 4. **Sediment exchange** — capacity = `max(Δh, ε)/cell · v · water · k`;
+//!    below capacity → erode at `dissolving_rate`, above → deposit at
+//!    `deposition_rate`; never erode more than the local terrain.
+//! 5. **Advect** — water and sediment are forward-displaced along ĝ
+//!    (mass-conserving bilinear distribution).
+//! 6. **Slippage / velocity / evaporation** — gaussian-blur cells whose
+//!    slope exceeds `repose_slope`; recompute the per-cell scalar velocity
+//!    from the new Δh; multiply water by `1 − evaporation_rate`.
+//!
+//! Adapted to our world:
+//!
+//! * The sim runs at `cfg.erosion_sim_res` (downsampled and upsampled
+//!   around the call), so a single preview pass costs minutes instead of
+//!   hours at full `global_res`. The macro shape is what matters; per-meter
+//!   detail comes from the tile baker's high-frequency noise downstream.
+//! * Terrain is internally normalized to `[0, 1]` (= `[0, max_elevation_m]`)
+//!   so dandrino's unit-less constants apply directly.
+//! * `land_mask` keeps sea cells pinned at 0 throughout the run and drains
+//!   any water/sediment that crosses the coast — rivers reach the sea and
+//!   disappear, the ocean floor never rises.
+//! * Post-sim the result is rescaled so its peak matches the pre-sim peak
+//!   (in meters), then bilinearly upsampled back to `global_res`. This
+//!   preserves world relief even when the sim flattened the absolute peak.
 
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
 use super::global_map::GlobalMap;
 
+const SLIPPAGE_BLUR_SIGMA: f32 = 1.5;
+/// Subsystem salt mixed into the sim RNG so erosion's stream is independent
+/// of other phases that share the master seed.
+const EROSION_RNG_SALT: u64 = 0xDA7E_DA7E_DA7E_DA7E;
+
 /// Run Phase 3. Mutates `map.elevation_m` in place.
 pub fn erode_hydraulic(map: &mut GlobalMap) {
     let cfg = map.config.clone();
-    if cfg.erosion_droplet_count == 0 {
+    let global_res = cfg.global_res as usize;
+    if global_res < 4 {
         return;
     }
-    let res = cfg.global_res as usize;
-    let res_f = res as f32;
-    // Droplet budget scales with map area so per-cell erosion intensity stays
-    // constant across resolutions.
-    let droplet_count = cfg.scaled_area_cells(cfg.erosion_droplet_count) as usize;
-    // Max steps scales linearly so a droplet traverses the same physical
-    // distance before giving up. Floor at 5 to keep short droplets viable.
-    let max_steps = cfg.scaled_cells(cfg.erosion_max_steps as f32).max(5.0) as usize;
-    let inertia = cfg.erosion_inertia.clamp(0.0, 1.0);
-    let capacity_factor = cfg.erosion_capacity_factor.max(0.0);
-    let min_slope = cfg.erosion_min_slope.max(0.0);
-    let erode_rate = cfg.erosion_rate.clamp(0.0, 1.0);
-    let deposit_rate = cfg.erosion_deposition_rate.clamp(0.0, 1.0);
+    let sim_res = if cfg.erosion_sim_res == 0 {
+        global_res
+    } else {
+        (cfg.erosion_sim_res as usize).min(global_res)
+    };
+    if sim_res < 4 {
+        return;
+    }
+    let iterations = if cfg.erosion_iterations == 0 {
+        ((sim_res as f32 * 1.4).ceil() as usize).max(1)
+    } else {
+        cfg.erosion_iterations as usize
+    };
+    if iterations == 0 {
+        return;
+    }
+
+    let max_elev = cfg.max_elevation_m.max(1.0);
+    // Pre-sim peak in meters, so the post-sim normalization preserves the
+    // pre-erosion dynamic range even when the sim shaved the global max.
+    let pre_max = map
+        .elevation_m
+        .iter()
+        .copied()
+        .zip(map.land_mask.iter().copied())
+        .filter_map(|(h, m)| if m == 1 { Some(h) } else { None })
+        .fold(0.0f32, f32::max)
+        .max(1e-6);
+
+    let (mut terrain, sim_land) =
+        downsample(&map.elevation_m, &map.land_mask, global_res, sim_res, max_elev);
+
+    run_simulation(&mut terrain, &sim_land, sim_res, &cfg, iterations);
+
+    upsample_into_elevation(
+        &terrain,
+        sim_res,
+        global_res,
+        max_elev,
+        pre_max,
+        &map.land_mask,
+        &mut map.elevation_m,
+    );
+}
+
+fn run_simulation(
+    terrain: &mut [f32],
+    land: &[u8],
+    res: usize,
+    cfg: &super::config::WorldGenConfig,
+    iterations: usize,
+) {
+    let cell_width = cfg.erosion_cell_width.max(1e-3);
+    let cell_area = cell_width * cell_width;
+    let rain_rate = cfg.erosion_rain_rate.max(0.0) * cell_area;
     let evap_rate = cfg.erosion_evaporation_rate.clamp(0.0, 1.0);
-    let radius = cfg.scaled_cells(cfg.erosion_radius_cells as f32).max(1.0) as i32;
+    let min_h_delta = cfg.erosion_min_height_delta.max(0.0);
+    let repose_slope = cfg.erosion_repose_slope.max(0.0);
+    let gravity = cfg.erosion_gravity.max(0.0);
+    let capacity_k = cfg.erosion_sediment_capacity.max(0.0);
+    let dissolving_rate = cfg.erosion_dissolving_rate.clamp(0.0, 1.0);
+    let deposition_rate = cfg.erosion_deposition_rate.clamp(0.0, 1.0);
 
-    // Precompute the erosion brush: (dx, dy, weight) entries within `radius`
-    // cells, weighted by a linear falloff that sums to 1. Applied with the
-    // cell at the droplet's position as the center.
-    let brush = build_brush(radius);
+    let total = res * res;
+    let mut sediment = vec![0.0f32; total];
+    let mut water = vec![0.0f32; total];
+    let mut velocity = vec![0.0f32; total];
+    let mut gx = vec![0.0f32; total];
+    let mut gy = vec![0.0f32; total];
+    let mut next_water = vec![0.0f32; total];
+    let mut next_sediment = vec![0.0f32; total];
+    let mut blur_tmp = vec![0.0f32; total];
+    let mut blur_out = vec![0.0f32; total];
+    // Lift the slippage blur kernel out of the per-iter call site since
+    // sigma is constant for the whole run.
+    let blur_kernel = build_gaussian_kernel(SLIPPAGE_BLUR_SIGMA);
 
-    let mut rng = SmallRng::seed_from_u64(cfg.seed ^ 0xE0DE_E0DE_E0DE_E0DE_u64);
-    let elev = &mut map.elevation_m;
-    let mask = &map.land_mask;
+    let mut rng = SmallRng::seed_from_u64(cfg.seed ^ EROSION_RNG_SALT);
+    let report_every = (iterations / 10).max(1);
+    let mut next_report = report_every;
 
-    // Pre-collect land-cell indices for cheap random starts. The borders
-    // (one cell) are excluded so bilinear sampling never reaches out of Y
-    // bounds; X wraps.
-    let mut land_indices: Vec<u32> = Vec::with_capacity((res * res) / 4);
-    for y in 1..(res - 1) {
-        for x in 0..res {
-            if mask[y * res + x] == 1 {
-                land_indices.push((y * res + x) as u32);
-            }
-        }
-    }
-    if land_indices.is_empty() {
-        return;
-    }
+    for iter in 0..iterations {
+        rain_step(&mut water, land, rain_rate, &mut rng);
+        compute_gradient(terrain, land, res, &mut gx, &mut gy, &mut rng);
+        sediment_exchange_step(
+            terrain,
+            land,
+            res,
+            cell_width,
+            min_h_delta,
+            capacity_k,
+            dissolving_rate,
+            deposition_rate,
+            &water,
+            &velocity,
+            &mut sediment,
+            &gx,
+            &gy,
+        );
+        displace(&sediment, &gx, &gy, res, &mut next_sediment);
+        displace(&water, &gx, &gy, res, &mut next_water);
+        std::mem::swap(&mut sediment, &mut next_sediment);
+        std::mem::swap(&mut water, &mut next_water);
 
-    for _ in 0..droplet_count {
-        let seed_idx = land_indices[rng.gen_range(0..land_indices.len())] as usize;
-        let sy = seed_idx / res;
-        let sx = seed_idx % res;
-        let mut x = sx as f32 + rng.gen::<f32>();
-        let mut y = sy as f32 + rng.gen::<f32>();
-        let mut vx = 0.0f32;
-        let mut vy = 0.0f32;
-        let mut water = 1.0f32;
-        let mut sediment = 0.0f32;
+        apply_slippage(
+            terrain,
+            res,
+            cell_width,
+            repose_slope,
+            &blur_kernel,
+            &mut blur_tmp,
+            &mut blur_out,
+        );
+        update_velocity(
+            terrain,
+            land,
+            res,
+            cell_width,
+            gravity,
+            &gx,
+            &gy,
+            &mut velocity,
+        );
+        evaporate(&mut water, evap_rate);
+        clear_sea(land, terrain, &mut water, &mut sediment, &mut velocity);
 
-        for _ in 0..max_steps {
-            let (old_h, gx, gy) = sample_height_and_gradient(elev, res, x, y);
-
-            // Update velocity toward the negative gradient, blending with
-            // the droplet's existing momentum.
-            vx = vx * inertia - gx * (1.0 - inertia);
-            vy = vy * inertia - gy * (1.0 - inertia);
-            let vlen = (vx * vx + vy * vy).sqrt();
-            if vlen < 1e-6 {
-                break;
-            }
-            let dx = vx / vlen;
-            let dy = vy / vlen;
-
-            let nx_raw = x + dx;
-            let ny = y + dy;
-            // Wrap X, bail on Y out-of-bounds.
-            let nx = nx_raw.rem_euclid(res_f);
-            if ny < 1.0 || ny >= res_f - 1.0 {
-                break;
-            }
-            // If the droplet entered a sea cell, stop — the sea absorbs it.
-            let nix = nx as usize;
-            let niy = ny as usize;
-            if mask[niy * res + nix] == 0 {
-                break;
-            }
-
-            let new_h = sample_height(elev, res, nx, ny);
-            let h_delta = new_h - old_h;
-
-            // Sediment capacity scales with downhill slope, speed, water.
-            let capacity = (-h_delta).max(min_slope) * vlen * water * capacity_factor;
-
-            if h_delta > 0.0 {
-                // Climbing — drop enough sediment to fill the hole (or all).
-                let drop = h_delta.min(sediment);
-                sediment -= drop;
-                deposit_bilinear(elev, mask, res, x, y, drop);
-            } else if sediment > capacity {
-                // Over capacity — deposit the excess bilinearly.
-                let drop = (sediment - capacity) * deposit_rate;
-                sediment -= drop;
-                deposit_bilinear(elev, mask, res, x, y, drop);
-            } else {
-                // Under capacity — erode around the current position.
-                let take = ((capacity - sediment) * erode_rate).min(-h_delta);
-                let taken = erode_with_brush(elev, mask, res, x, y, take, &brush);
-                sediment += taken;
-            }
-
-            x = nx;
-            y = ny;
-            water *= 1.0 - evap_rate;
-            if water < 1e-4 {
-                break;
+        let done = iter + 1;
+        if done == iterations || done >= next_report {
+            let pct = done * 100 / iterations;
+            eprintln!("    erosion: {pct:>3}% ({done}/{iterations})");
+            while next_report <= done {
+                next_report += report_every;
             }
         }
     }
 }
 
-/// Bilinear height sample at (fx, fy), X wrapping, Y clamped.
+// --- Sim steps ----------------------------------------------------------
+
+fn rain_step(water: &mut [f32], land: &[u8], rate: f32, rng: &mut SmallRng) {
+    if rate <= 0.0 {
+        return;
+    }
+    for (w, &m) in water.iter_mut().zip(land.iter()) {
+        if m == 1 {
+            *w += rng.gen::<f32>() * rate;
+        }
+    }
+}
+
+fn compute_gradient(
+    terrain: &[f32],
+    land: &[u8],
+    res: usize,
+    gx: &mut [f32],
+    gy: &mut [f32],
+    rng: &mut SmallRng,
+) {
+    for y in 0..res {
+        for x in 0..res {
+            let i = y * res + x;
+            if land[i] == 0 {
+                gx[i] = 0.0;
+                gy[i] = 0.0;
+                continue;
+            }
+            // (fx, fy) point in the +X / +Y direction when the left/up
+            // neighbor is higher — i.e. *downhill* in our index space, so
+            // water flows in this direction.
+            let (mut fx, mut fy) = central_diff(terrain, res, x, y);
+            let len = (fx * fx + fy * fy).sqrt();
+            if len > 1e-10 {
+                fx /= len;
+                fy /= len;
+            } else {
+                // Flat cell: pick a random direction so accumulated water
+                // still has somewhere to go (matches dandrino's exp(2πi·rand)).
+                let a = rng.gen::<f32>() * std::f32::consts::TAU;
+                fx = a.cos();
+                fy = a.sin();
+            }
+            gx[i] = fx;
+            gy[i] = fy;
+        }
+    }
+}
+
+/// Central-difference of `field` at `(x, y)`, X-wrapping, Y-clamping.
+/// Returns the unscaled `(left-right, up-down)/2` so callers apply their
+/// own per-cell-width or normalization step.
 #[inline]
-fn sample_height(elev: &[f32], res: usize, fx: f32, fy: f32) -> f32 {
+fn central_diff(field: &[f32], res: usize, x: usize, y: usize) -> (f32, f32) {
+    let res_i = res as i32;
+    let last = res - 1;
+    let xl = ((x as i32 - 1).rem_euclid(res_i)) as usize;
+    let xr = ((x as i32 + 1).rem_euclid(res_i)) as usize;
+    let yu = if y == 0 { 0 } else { y - 1 };
+    let yd = if y == last { last } else { y + 1 };
+    let dx = 0.5 * (field[y * res + xl] - field[y * res + xr]);
+    let dy = 0.5 * (field[yu * res + x] - field[yd * res + x]);
+    (dx, dy)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sediment_exchange_step(
+    terrain: &mut [f32],
+    land: &[u8],
+    res: usize,
+    cell_width: f32,
+    min_h_delta: f32,
+    capacity_k: f32,
+    dissolving_rate: f32,
+    deposition_rate: f32,
+    water: &[f32],
+    velocity: &[f32],
+    sediment: &mut [f32],
+    gx: &[f32],
+    gy: &[f32],
+) {
+    let inv_cw = 1.0 / cell_width.max(1e-6);
+    for y in 0..res {
+        for x in 0..res {
+            let i = y * res + x;
+            if land[i] == 0 {
+                continue;
+            }
+            let nx = x as f32 + gx[i];
+            let ny = y as f32 + gy[i];
+            let neighbor = bilinear_sample(terrain, res, nx, ny);
+            let h_delta = terrain[i] - neighbor;
+
+            let drop_pos = h_delta.max(min_h_delta);
+            let capacity = drop_pos * inv_cw * velocity[i] * water[i] * capacity_k;
+
+            // dandrino's three-way select.
+            //   h_delta < 0  → climbing: deposit min(|Δh|, sediment) (+).
+            //   sed > cap    → over capacity: deposit fraction of excess (+).
+            //   else         → erode fraction of capacity-deficit (−).
+            let mut deposited = if h_delta < 0.0 {
+                h_delta.min(sediment[i]) // negative or zero
+            } else if sediment[i] > capacity {
+                deposition_rate * (sediment[i] - capacity) // positive
+            } else {
+                dissolving_rate * (sediment[i] - capacity) // ≤ 0
+            };
+            // Don't erode more than the current Δh worth — the cell can't
+            // sink below its downstream neighbor.
+            if deposited < -h_delta {
+                deposited = -h_delta;
+            }
+            sediment[i] -= deposited;
+            terrain[i] += deposited;
+            if terrain[i] < 0.0 {
+                terrain[i] = 0.0;
+            }
+            if sediment[i] < 0.0 {
+                sediment[i] = 0.0;
+            }
+        }
+    }
+}
+
+/// Mass-conserving forward advection: distribute each cell's value into the
+/// 4 cells overlapped by the unit-square shifted by `(gx, gy)`. dandrino's
+/// `displace` written out as a 9-cell forward pass (most weights are zero).
+fn displace(src: &[f32], gx: &[f32], gy: &[f32], res: usize, dst: &mut [f32]) {
+    dst.fill(0.0);
+    let res_i = res as i32;
+    let last = res - 1;
+    for y in 0..res {
+        let ym = if y == 0 { 0 } else { y - 1 };
+        let yp = if y == last { last } else { y + 1 };
+        for x in 0..res {
+            let i = y * res + x;
+            let v = src[i];
+            if v == 0.0 {
+                continue;
+            }
+            let dx_f = gx[i];
+            let dy_f = gy[i];
+            let xm = ((x as i32 - 1).rem_euclid(res_i)) as usize;
+            let xp = ((x as i32 + 1).rem_euclid(res_i)) as usize;
+            // Bilinear forward-distribution into the 4 cells overlapped by
+            // the unit square shifted by (gx, gy). Either xneg or xpos has
+            // weight 0, same for y, so only ~4 of 9 combos do real work.
+            let cols = [
+                (xm, (-dx_f).max(0.0)),
+                (x, (1.0 - dx_f.abs()).max(0.0)),
+                (xp, dx_f.max(0.0)),
+            ];
+            let rows = [
+                (ym, (-dy_f).max(0.0)),
+                (y, (1.0 - dy_f.abs()).max(0.0)),
+                (yp, dy_f.max(0.0)),
+            ];
+            for (ry, wy) in rows {
+                if wy <= 0.0 {
+                    continue;
+                }
+                let row = ry * res;
+                let vy = v * wy;
+                for (cx, wx) in cols {
+                    if wx <= 0.0 {
+                        continue;
+                    }
+                    dst[row + cx] += vy * wx;
+                }
+            }
+        }
+    }
+}
+
+fn apply_slippage(
+    terrain: &mut [f32],
+    res: usize,
+    cell_width: f32,
+    repose_slope: f32,
+    blur_kernel: &[f32],
+    blur_tmp: &mut [f32],
+    blur_out: &mut [f32],
+) {
+    if repose_slope <= 0.0 {
+        return;
+    }
+    gaussian_blur(terrain, res, blur_kernel, blur_tmp, blur_out);
+    let inv_cw = 1.0 / cell_width.max(1e-6);
+    // Squared comparison avoids a sqrt per cell.
+    let thresh_sq = repose_slope * repose_slope;
+    for y in 0..res {
+        for x in 0..res {
+            let (dx, dy) = central_diff(terrain, res, x, y);
+            let slope_sq = (dx * dx + dy * dy) * inv_cw * inv_cw;
+            if slope_sq > thresh_sq {
+                let i = y * res + x;
+                terrain[i] = blur_out[i];
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_velocity(
+    terrain: &[f32],
+    land: &[u8],
+    res: usize,
+    cell_width: f32,
+    gravity: f32,
+    gx: &[f32],
+    gy: &[f32],
+    velocity: &mut [f32],
+) {
+    // Re-sample the neighbor (rather than reusing Δh from `sediment_exchange`)
+    // because `apply_slippage` runs in between and may have flattened the
+    // local slope; velocity needs to reflect the post-slippage terrain.
+    let inv_cw = 1.0 / cell_width.max(1e-6);
+    for y in 0..res {
+        for x in 0..res {
+            let i = y * res + x;
+            if land[i] == 0 {
+                velocity[i] = 0.0;
+                continue;
+            }
+            let nx = x as f32 + gx[i];
+            let ny = y as f32 + gy[i];
+            let neighbor = bilinear_sample(terrain, res, nx, ny);
+            let h_delta = terrain[i] - neighbor;
+            velocity[i] = gravity * h_delta * inv_cw;
+        }
+    }
+}
+
+fn evaporate(water: &mut [f32], rate: f32) {
+    if rate <= 0.0 {
+        return;
+    }
+    let factor = 1.0 - rate;
+    for w in water.iter_mut() {
+        *w *= factor;
+    }
+}
+
+fn clear_sea(
+    land: &[u8],
+    terrain: &mut [f32],
+    water: &mut [f32],
+    sediment: &mut [f32],
+    velocity: &mut [f32],
+) {
+    for (i, &m) in land.iter().enumerate() {
+        if m == 0 {
+            terrain[i] = 0.0;
+            water[i] = 0.0;
+            sediment[i] = 0.0;
+            velocity[i] = 0.0;
+        }
+    }
+}
+
+// --- Helpers ------------------------------------------------------------
+
+#[inline]
+fn bilinear_sample(field: &[f32], res: usize, fx: f32, fy: f32) -> f32 {
     let ix = fx.floor() as i32;
     let iy = fy.floor() as i32;
     let dx = fx - ix as f32;
     let dy = fy - iy as f32;
-    let ix0 = (ix.rem_euclid(res as i32)) as usize;
-    let ix1 = ((ix + 1).rem_euclid(res as i32)) as usize;
-    let iy0 = iy.clamp(0, res as i32 - 1) as usize;
-    let iy1 = (iy + 1).clamp(0, res as i32 - 1) as usize;
-    let h00 = elev[iy0 * res + ix0];
-    let h10 = elev[iy0 * res + ix1];
-    let h01 = elev[iy1 * res + ix0];
-    let h11 = elev[iy1 * res + ix1];
-    let top = h00 * (1.0 - dx) + h10 * dx;
-    let bot = h01 * (1.0 - dx) + h11 * dx;
+    let res_i = res as i32;
+    let ix0 = ix.rem_euclid(res_i) as usize;
+    let ix1 = (ix + 1).rem_euclid(res_i) as usize;
+    let iy0 = iy.clamp(0, res_i - 1) as usize;
+    let iy1 = (iy + 1).clamp(0, res_i - 1) as usize;
+    let v00 = field[iy0 * res + ix0];
+    let v10 = field[iy0 * res + ix1];
+    let v01 = field[iy1 * res + ix0];
+    let v11 = field[iy1 * res + ix1];
+    let top = v00 * (1.0 - dx) + v10 * dx;
+    let bot = v01 * (1.0 - dx) + v11 * dx;
     top * (1.0 - dy) + bot * dy
 }
 
-/// Bilinear height + gradient at (fx, fy). Gradient is analytic from the
-/// four corner heights of the surrounding cell.
-#[inline]
-fn sample_height_and_gradient(elev: &[f32], res: usize, fx: f32, fy: f32) -> (f32, f32, f32) {
-    let ix = fx.floor() as i32;
-    let iy = fy.floor() as i32;
-    let dx = fx - ix as f32;
-    let dy = fy - iy as f32;
-    let ix0 = (ix.rem_euclid(res as i32)) as usize;
-    let ix1 = ((ix + 1).rem_euclid(res as i32)) as usize;
-    let iy0 = iy.clamp(0, res as i32 - 1) as usize;
-    let iy1 = (iy + 1).clamp(0, res as i32 - 1) as usize;
-    let h00 = elev[iy0 * res + ix0];
-    let h10 = elev[iy0 * res + ix1];
-    let h01 = elev[iy1 * res + ix0];
-    let h11 = elev[iy1 * res + ix1];
-    let top = h00 * (1.0 - dx) + h10 * dx;
-    let bot = h01 * (1.0 - dx) + h11 * dx;
-    let h = top * (1.0 - dy) + bot * dy;
-    // Analytic gradient of the bilinear patch.
-    let gx = (h10 - h00) * (1.0 - dy) + (h11 - h01) * dy;
-    let gy = (h01 - h00) * (1.0 - dx) + (h11 - h10) * dx;
-    (h, gx, gy)
+/// Build a normalized 1-D gaussian kernel with `radius = ceil(3·sigma)`,
+/// suitable for the separable two-pass blur below.
+fn build_gaussian_kernel(sigma: f32) -> Vec<f32> {
+    let radius = (sigma * 3.0).ceil().max(1.0) as usize;
+    let mut k = vec![0.0f32; 2 * radius + 1];
+    let inv2sig2 = 1.0 / (2.0 * sigma * sigma);
+    let mut sum = 0.0;
+    for (i, slot) in k.iter_mut().enumerate() {
+        let xc = i as f32 - radius as f32;
+        *slot = (-xc * xc * inv2sig2).exp();
+        sum += *slot;
+    }
+    for v in &mut k {
+        *v /= sum;
+    }
+    k
 }
 
-/// Deposit `amount` of sediment at (fx, fy) using bilinear weights across
-/// the 4 surrounding cells. Respects the land mask — sea cells don't
-/// accumulate elevation (otherwise we'd raise ocean floor above 0).
-#[inline]
-fn deposit_bilinear(elev: &mut [f32], mask: &[u8], res: usize, fx: f32, fy: f32, amount: f32) {
-    if amount == 0.0 {
-        return;
-    }
-    let ix = fx.floor() as i32;
-    let iy = fy.floor() as i32;
-    let dx = fx - ix as f32;
-    let dy = fy - iy as f32;
-    let ix0 = (ix.rem_euclid(res as i32)) as usize;
-    let ix1 = ((ix + 1).rem_euclid(res as i32)) as usize;
-    let iy0 = iy.clamp(0, res as i32 - 1) as usize;
-    let iy1 = (iy + 1).clamp(0, res as i32 - 1) as usize;
-    let w00 = (1.0 - dx) * (1.0 - dy);
-    let w10 = dx * (1.0 - dy);
-    let w01 = (1.0 - dx) * dy;
-    let w11 = dx * dy;
-    add_if_land(elev, mask, iy0 * res + ix0, amount * w00);
-    add_if_land(elev, mask, iy0 * res + ix1, amount * w10);
-    add_if_land(elev, mask, iy1 * res + ix0, amount * w01);
-    add_if_land(elev, mask, iy1 * res + ix1, amount * w11);
-}
-
-#[inline]
-fn add_if_land(elev: &mut [f32], mask: &[u8], idx: usize, amount: f32) {
-    if mask[idx] == 1 {
-        elev[idx] = (elev[idx] + amount).max(0.0);
-    }
-}
-
-/// Erode cells around (fx, fy) using a precomputed disk brush. Returns the
-/// actual amount of material removed (may be less than `amount` if some
-/// cells were sea / under-floor).
-fn erode_with_brush(
-    elev: &mut [f32],
-    mask: &[u8],
-    res: usize,
-    fx: f32,
-    fy: f32,
-    amount: f32,
-    brush: &[(i32, i32, f32)],
-) -> f32 {
-    if amount <= 0.0 {
-        return 0.0;
-    }
-    let cx = fx as i32;
-    let cy = fy as i32;
-    let mut removed = 0.0f32;
-    for &(dx, dy, w) in brush {
-        let ny = cy + dy;
-        if ny < 0 || ny >= res as i32 {
-            continue;
+fn gaussian_blur(src: &[f32], res: usize, kernel: &[f32], tmp: &mut [f32], dst: &mut [f32]) {
+    let radius = kernel.len() / 2;
+    let res_i = res as i32;
+    // Horizontal pass (X wraps).
+    for y in 0..res {
+        let row = y * res;
+        for x in 0..res {
+            let mut s = 0.0f32;
+            for (k_idx, &w) in kernel.iter().enumerate() {
+                let dx = k_idx as i32 - radius as i32;
+                let xi = (x as i32 + dx).rem_euclid(res_i) as usize;
+                s += w * src[row + xi];
+            }
+            tmp[row + x] = s;
         }
-        let nx = (cx + dx).rem_euclid(res as i32) as usize;
-        let idx = ny as usize * res + nx;
-        if mask[idx] == 0 {
-            continue;
-        }
-        let to_remove = (amount * w).min(elev[idx]);
-        elev[idx] -= to_remove;
-        removed += to_remove;
     }
-    removed
+    // Vertical pass (Y clamps).
+    for y in 0..res {
+        for x in 0..res {
+            let mut s = 0.0f32;
+            for (k_idx, &w) in kernel.iter().enumerate() {
+                let dy = k_idx as i32 - radius as i32;
+                let yi = (y as i32 + dy).clamp(0, res_i - 1) as usize;
+                s += w * tmp[yi * res + x];
+            }
+            dst[y * res + x] = s;
+        }
+    }
 }
 
-/// Build a disk brush with linear falloff inside `radius` cells, normalized
-/// so the weights sum to 1.
-fn build_brush(radius: i32) -> Vec<(i32, i32, f32)> {
-    let mut out: Vec<(i32, i32, f32)> = Vec::new();
-    let rf = radius as f32;
-    let mut total = 0.0f32;
-    for dy in -radius..=radius {
-        for dx in -radius..=radius {
-            let d = ((dx * dx + dy * dy) as f32).sqrt();
-            if d > rf {
+fn downsample(
+    elevation: &[f32],
+    land: &[u8],
+    src_res: usize,
+    dst_res: usize,
+    max_elev: f32,
+) -> (Vec<f32>, Vec<u8>) {
+    let total = dst_res * dst_res;
+    let mut terrain = vec![0.0f32; total];
+    let mut sim_land = vec![0u8; total];
+    let scale = src_res as f32 / dst_res as f32;
+    let src_i = src_res as i32;
+    for dy in 0..dst_res {
+        for dx in 0..dst_res {
+            let sx_f = (dx as f32 + 0.5) * scale - 0.5;
+            let sy_f = (dy as f32 + 0.5) * scale - 0.5;
+            let h = bilinear_sample(elevation, src_res, sx_f, sy_f);
+            terrain[dy * dst_res + dx] = (h / max_elev).clamp(0.0, 1.0);
+            // Nearest-neighbor land mask. Bilinear of a binary field would
+            // smudge coastlines into halves we'd then have to threshold; the
+            // mask is already discrete, so just pick the closest source cell.
+            let sx = (sx_f.round() as i32).rem_euclid(src_i) as usize;
+            let sy = (sy_f.round() as i32).clamp(0, src_i - 1) as usize;
+            sim_land[dy * dst_res + dx] = land[sy * src_res + sx];
+        }
+    }
+    (terrain, sim_land)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsample_into_elevation(
+    sim_terrain: &[f32],
+    sim_res: usize,
+    dst_res: usize,
+    max_elev: f32,
+    pre_max: f32,
+    dst_land: &[u8],
+    dst_elev: &mut [f32],
+) {
+    // Renormalize sim peak to the pre-erosion peak in meters so the world
+    // doesn't shrink to a pancake when the sim shaved the absolute max.
+    let post_max = sim_terrain
+        .iter()
+        .copied()
+        .fold(0.0f32, f32::max)
+        .max(1e-6);
+    let meter_scale = pre_max / post_max;
+    let scale = sim_res as f32 / dst_res as f32;
+    for dy in 0..dst_res {
+        for dx in 0..dst_res {
+            let i = dy * dst_res + dx;
+            if dst_land[i] == 0 {
+                dst_elev[i] = 0.0;
                 continue;
             }
-            let w = 1.0 - d / rf;
-            if w <= 0.0 {
-                continue;
-            }
-            out.push((dx, dy, w));
-            total += w;
+            let sx_f = (dx as f32 + 0.5) * scale - 0.5;
+            let sy_f = (dy as f32 + 0.5) * scale - 0.5;
+            let h = bilinear_sample(sim_terrain, sim_res, sx_f, sy_f);
+            dst_elev[i] = (h * meter_scale).clamp(0.0, max_elev);
         }
     }
-    if total > 0.0 {
-        for entry in &mut out {
-            entry.2 /= total;
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -287,68 +588,32 @@ mod tests {
     use crate::worldgen::config::WorldGenConfig;
 
     fn test_config(res: u32) -> WorldGenConfig {
-        WorldGenConfig {
-            seed: 0xBEEF,
-            world_size_m: 4096,
-            global_res: res,
-            reference_res: res,
-            sea_ratio: 0.3,
-            mountain_ratio: 0.3,
-            continent_frequency: 1.0 / 64.0,
-            continent_octaves: 4,
-            continent_gain: 0.5,
-            min_island_cells: 0,
-            min_strait_width_cells: 0,
-            sea_channel_strength: 0.0,
-            sea_channel_wavelength: 1000.0,
-            max_isthmus_width_cells: 0,
-            continent_seed_count: 3,
-            continent_seed_min_distance_cells: 20,
-            target_continent_count: 1,
-            continent_gap_cells: 0,
-            small_island_count: 0,
-            small_island_radius_cells: 10,
-            small_island_min_clearance_cells: 20,
-            max_elevation_m: 2500.0,
-            base_elevation_m: 500.0,
-            mountain_amplitude_m: 1800.0,
-            plain_amplitude_m: 40.0,
-            mountain_selector_wavelength_cells: 64.0,
-            detail_wavelength_cells: 16.0,
-            mountain_inland_buffer_m: 0.0,
-            y_border_wall_cells: 0,
-            y_border_wall_height_m: 0.0,
-            erosion_droplet_count: 5_000,
-            erosion_max_steps: 40,
-            erosion_inertia: 0.05,
-            erosion_capacity_factor: 4.0,
-            erosion_min_slope: 0.01,
-            erosion_rate: 0.3,
-            erosion_deposition_rate: 0.3,
-            erosion_evaporation_rate: 0.02,
-            erosion_radius_cells: 3,
-            settlement_target_count: 5,
-            settlement_min_spacing_cells: 10,
-            settlement_max_elevation_m: 1200.0,
-            settlement_max_slope: 0.35,
-            settlement_river_flow_threshold: 20.0,
-            settlement_along_road_count: 0,
-            settlement_inland_buffer_cells: 0,
-            settlement_coastal_spacing_mult: 1.0,
-            settlement_mouth_count: 0,
-            settlement_phase_a_spacing_mult: 1.0,
-            settlement_south_edge_exclusion_m: 0.0,
-            settlement_max_gap_m: 0.0,
-            river_gap_max_m: 0.0,
-            road_extra_neighbors: 0,
-            elevation_hotspots: Vec::new(),
-            river_carve_paths: Vec::new(),
-        }
+        let mut cfg = WorldGenConfig::default();
+        cfg.seed = 0xBEEF;
+        cfg.world_size_m = 4096;
+        cfg.global_res = res;
+        cfg.reference_res = res;
+        cfg.continent_frequency = 1.0 / 64.0;
+        cfg.min_island_cells = 0;
+        cfg.min_strait_width_cells = 0;
+        cfg.continent_seed_count = 3;
+        cfg.continent_seed_min_distance_cells = 20;
+        cfg.target_continent_count = 1;
+        cfg.continent_gap_cells = 0;
+        cfg.small_island_count = 0;
+        cfg.y_border_wall_cells = 0;
+        cfg.y_border_wall_height_m = 0.0;
+        // Run the sim at the test resolution (skip downsample) and use a
+        // small iteration count so the test finishes quickly.
+        cfg.erosion_sim_res = res;
+        cfg.erosion_iterations = 24;
+        cfg.initial_relief_wavelength_cells = (res as f32 / 4.0).max(8.0);
+        cfg
     }
 
     #[test]
     fn erosion_preserves_sea_at_zero() {
-        let cfg = test_config(128);
+        let cfg = test_config(96);
         let mut map = continent::generate_continent_mask(&cfg);
         elevation::generate_elevation(&mut map);
         erode_hydraulic(&mut map);
@@ -365,23 +630,21 @@ mod tests {
 
     #[test]
     fn erosion_does_not_exceed_max_elevation() {
-        let cfg = test_config(128);
+        let cfg = test_config(96);
         let mut map = continent::generate_continent_mask(&cfg);
         elevation::generate_elevation(&mut map);
         erode_hydraulic(&mut map);
-        // Erosion could deposit on top of mountains if sediment is dropped
-        // there; allow a little slack but require no runaway growth.
         let max_observed = map.elevation_m.iter().fold(0.0f32, |a, &b| a.max(b));
         assert!(
-            max_observed <= cfg.max_elevation_m * 1.2,
-            "post-erosion max {max_observed} wildly exceeds cap {}",
+            max_observed <= cfg.max_elevation_m + 1e-3,
+            "post-erosion max {max_observed} exceeds cap {}",
             cfg.max_elevation_m
         );
     }
 
     #[test]
     fn deterministic_for_same_seed() {
-        let cfg = test_config(96);
+        let cfg = test_config(64);
         let mut a = continent::generate_continent_mask(&cfg);
         elevation::generate_elevation(&mut a);
         erode_hydraulic(&mut a);
@@ -392,20 +655,47 @@ mod tests {
     }
 
     #[test]
-    fn erosion_reduces_peak_height() {
-        // Run erosion with a lot of droplets and check the tallest mountain
-        // got knocked down (standard consequence of hydraulic erosion).
-        let mut cfg = test_config(128);
-        cfg.erosion_droplet_count = 30_000;
-        let mut before = continent::generate_continent_mask(&cfg);
-        elevation::generate_elevation(&mut before);
-        let peak_before = before.elevation_m.iter().fold(0.0f32, |a, &b| a.max(b));
-        let mut after = before.clone();
-        erode_hydraulic(&mut after);
-        let peak_after = after.elevation_m.iter().fold(0.0f32, |a, &b| a.max(b));
+    fn displace_conserves_mass() {
+        // Random gradient field, random source field. After one displace
+        // pass, sums should match (modulo edge clamping in Y).
+        let res = 32;
+        let total = res * res;
+        let mut rng = SmallRng::seed_from_u64(7);
+        let src: Vec<f32> = (0..total).map(|_| rng.gen::<f32>()).collect();
+        let mut gx = vec![0.0f32; total];
+        let mut gy = vec![0.0f32; total];
+        for i in 0..total {
+            // Restrict gradients to interior cells so Y-boundary clamping
+            // doesn't spuriously dump mass on the edges.
+            let y = i / res;
+            if y == 0 || y + 1 >= res {
+                continue;
+            }
+            let a = rng.gen::<f32>() * std::f32::consts::TAU;
+            gx[i] = a.cos() * 0.7;
+            gy[i] = a.sin() * 0.7;
+        }
+        let mut dst = vec![0.0f32; total];
+        displace(&src, &gx, &gy, res, &mut dst);
+        let sum_src: f32 = src.iter().sum();
+        let sum_dst: f32 = dst.iter().sum();
         assert!(
-            peak_after < peak_before,
-            "erosion didn't reduce peak: before {peak_before}, after {peak_after}"
+            (sum_src - sum_dst).abs() < 1e-3,
+            "displace lost mass: src {sum_src} vs dst {sum_dst}"
         );
+    }
+
+    #[test]
+    fn gaussian_blur_preserves_constant_field() {
+        let res = 16;
+        let total = res * res;
+        let src = vec![0.7f32; total];
+        let mut tmp = vec![0.0f32; total];
+        let mut dst = vec![0.0f32; total];
+        let kernel = build_gaussian_kernel(1.5);
+        gaussian_blur(&src, res, &kernel, &mut tmp, &mut dst);
+        for &v in &dst {
+            assert!((v - 0.7).abs() < 1e-4, "constant got perturbed: {v}");
+        }
     }
 }

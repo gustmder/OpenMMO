@@ -475,7 +475,6 @@ mod tests {
             small_island_count: 0,
             small_island_radius_cells: 0,
             small_island_min_clearance_cells: 0,
-            erosion_droplet_count: 0,
             settlement_target_count: 5,
             settlement_min_spacing_cells: 10,
             settlement_along_road_count: 0,

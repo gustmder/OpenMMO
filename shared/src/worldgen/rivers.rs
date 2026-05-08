@@ -748,63 +748,29 @@ mod tests {
     use crate::worldgen::global_map::GlobalMap;
 
     fn test_config(res: u32) -> WorldGenConfig {
-        WorldGenConfig {
-            seed: 0xBEEF,
-            world_size_m: 4096,
-            global_res: res,
-            reference_res: res,
-            sea_ratio: 0.3,
-            mountain_ratio: 0.3,
-            continent_frequency: 1.0 / 64.0,
-            continent_octaves: 4,
-            continent_gain: 0.5,
-            min_island_cells: 0,
-            min_strait_width_cells: 0,
-            sea_channel_strength: 0.0,
-            sea_channel_wavelength: 1000.0,
-            max_isthmus_width_cells: 0,
-            continent_seed_count: 3,
-            continent_seed_min_distance_cells: 20,
-            target_continent_count: 1,
-            continent_gap_cells: 0,
-            small_island_count: 0,
-            small_island_radius_cells: 10,
-            small_island_min_clearance_cells: 20,
-            max_elevation_m: 2500.0,
-            base_elevation_m: 500.0,
-            mountain_amplitude_m: 1800.0,
-            plain_amplitude_m: 40.0,
-            mountain_selector_wavelength_cells: 64.0,
-            detail_wavelength_cells: 16.0,
-            mountain_inland_buffer_m: 0.0,
-            y_border_wall_cells: 0,
-            y_border_wall_height_m: 0.0,
-            erosion_droplet_count: 0,
-            erosion_max_steps: 50,
-            erosion_inertia: 0.05,
-            erosion_capacity_factor: 4.0,
-            erosion_min_slope: 0.01,
-            erosion_rate: 0.3,
-            erosion_deposition_rate: 0.3,
-            erosion_evaporation_rate: 0.02,
-            erosion_radius_cells: 3,
-            settlement_target_count: 5,
-            settlement_min_spacing_cells: 10,
-            settlement_max_elevation_m: 1200.0,
-            settlement_max_slope: 0.35,
-            settlement_river_flow_threshold: 20.0,
-            settlement_along_road_count: 0,
-            settlement_inland_buffer_cells: 0,
-            settlement_coastal_spacing_mult: 1.0,
-            settlement_mouth_count: 0,
-            settlement_phase_a_spacing_mult: 1.0,
-            settlement_south_edge_exclusion_m: 0.0,
-            settlement_max_gap_m: 0.0,
-            river_gap_max_m: 0.0,
-            road_extra_neighbors: 0,
-            elevation_hotspots: Vec::new(),
-            river_carve_paths: Vec::new(),
-        }
+        let mut cfg = WorldGenConfig::default();
+        cfg.seed = 0xBEEF;
+        cfg.world_size_m = 4096;
+        cfg.global_res = res;
+        cfg.reference_res = res;
+        cfg.sea_ratio = 0.3;
+        cfg.continent_frequency = 1.0 / 64.0;
+        cfg.min_island_cells = 0;
+        cfg.min_strait_width_cells = 0;
+        cfg.continent_seed_count = 3;
+        cfg.continent_seed_min_distance_cells = 20;
+        cfg.target_continent_count = 1;
+        cfg.continent_gap_cells = 0;
+        cfg.small_island_count = 0;
+        cfg.y_border_wall_cells = 0;
+        cfg.y_border_wall_height_m = 0.0;
+        cfg.river_gap_max_m = 0.0;
+        // Default wavelength is sized for a 4096-cell production map; in
+        // the small test resolutions a 700-cell wavelength is wider than
+        // the world and degenerates to one monotonic gradient. Pick a
+        // wavelength that produces several peaks at this scale.
+        cfg.initial_relief_wavelength_cells = (res as f32 / 4.0).max(8.0);
+        cfg
     }
 
     fn cell_idx(res: u32, x: u32, y: u32) -> usize {

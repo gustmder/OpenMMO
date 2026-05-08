@@ -231,7 +231,6 @@ mod tests {
             min_island_cells: 0,
             min_strait_width_cells: 0,
             max_isthmus_width_cells: 0,
-            erosion_droplet_count: 0,
             settlement_target_count: 3,
             settlement_min_spacing_cells: 10,
             settlement_inland_buffer_cells: 0,

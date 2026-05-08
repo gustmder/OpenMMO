@@ -57,10 +57,6 @@ pub struct WorldGenConfig {
     /// Target fraction of the world covered by sea (0..1).
     pub sea_ratio: f32,
 
-    /// Of the land, target fraction that becomes mountain terrain (0..1).
-    /// Remainder is plains/hills.
-    pub mountain_ratio: f32,
-
     /// Continent noise frequency, in cycles per global cell.
     /// Lower = fewer, larger continents. Typical: 1.0 / 2048.0 at 4096 res
     /// (so full map spans ~2 cycles, giving 2-3 continents).
@@ -144,39 +140,31 @@ pub struct WorldGenConfig {
     pub small_island_min_clearance_cells: u32,
 
     // --- Phase 2: elevation ------------------------------------------------
-    /// Maximum elevation in meters (used as a cap for land cells and as the
-    /// target peak for the north/south mountain wall).
+    /// Maximum elevation in meters. Caps land cells; also acts as the
+    /// physical scale for the dandrino erosion sim (terrain is internally
+    /// normalized to [0, 1] = [0, max_elevation_m]).
     pub max_elevation_m: f32,
 
-    /// Target height of the smooth base-elevation gradient that rises with
-    /// distance from coast. Reached around 40% of the coast-to-interior
-    /// distance, then flattens.
+    /// Mean elevation in meters of the pre-erosion FBM heightmap on land.
+    /// Erosion will redistribute mass downhill from this baseline.
     pub base_elevation_m: f32,
 
-    /// Amplitude (± meters) of detail noise inside mountain regions — the
-    /// dominant driver of peak/valley height variation there.
-    pub mountain_amplitude_m: f32,
+    /// Initial relief amplitude on land before erosion, as a fraction of
+    /// `max_elevation_m`. The pre-erosion heightmap is `base + amp · fbm`
+    /// where fbm ∈ [-1, 1]. Higher amplitude = more dramatic mountains
+    /// after erosion; lower = gentler hills.
+    pub initial_relief_amp: f32,
 
-    /// Amplitude (± meters) of detail noise in plain regions. Much smaller
-    /// than mountain amplitude so plains look flat-to-gently-rolling.
-    pub plain_amplitude_m: f32,
+    /// Wavelength (global cells) of the pre-erosion FBM. Sets the spacing
+    /// of macro mountain ranges.
+    pub initial_relief_wavelength_cells: f32,
 
-    /// Wavelength (global cells) of the mountain/plain selector noise.
-    /// Larger = broader mountain ranges and plains.
-    pub mountain_selector_wavelength_cells: f32,
+    /// Number of fBm octaves for the pre-erosion heightmap.
+    pub initial_relief_octaves: u32,
 
-    /// Wavelength (global cells) of the high-frequency detail noise that
-    /// creates local peaks and valleys on top of the base gradient.
-    pub detail_wavelength_cells: f32,
-
-    /// Minimum distance (meters) from the coast that procedural mountains
-    /// are allowed to reach. Within this band the mountain/plain selector
-    /// is gated toward "plain" (smooth ramp from 0 at the shoreline to 1
-    /// at the buffer edge), and the river-gap-fill pass excludes hotspot
-    /// centers whose disk would extend into the band. Coastal mountains
-    /// produce unwalkable cliffs at the water's edge in-game; pushing
-    /// them inland keeps shores playable. 0 = disabled (legacy behavior).
-    pub mountain_inland_buffer_m: f32,
+    /// fBm gain (persistence) for the pre-erosion heightmap. ~0.5 gives
+    /// classic red-noise mountain ranges.
+    pub initial_relief_gain: f32,
 
     /// Number of cells of the north/south border where land is boosted
     /// toward `max_elevation_m` to form an impassable mountain wall (since
@@ -187,40 +175,59 @@ pub struct WorldGenConfig {
     /// close to `max_elevation_m` so the wall reliably blocks traversal.
     pub y_border_wall_height_m: f32,
 
-    // --- Phase 3: hydraulic erosion ---------------------------------------
-    /// Number of water droplets simulated across the whole map. Scales with
-    /// map area; ~200k-500k is reasonable at 4096² res. 0 = erosion off.
-    pub erosion_droplet_count: u32,
+    // --- Phase 3: hydraulic erosion (dandrino simulation) ----------------
+    // Faithful port of https://github.com/dandrino/terrain-erosion-3-ways
+    // simulation.py. Terrain is internally normalized to [0, 1] (= [0,
+    // max_elevation_m]) before the sim runs; constants below are in those
+    // unit-less terms, identical to dandrino's defaults.
 
-    /// Max steps a single droplet takes before being discarded.
-    pub erosion_max_steps: u32,
+    /// Resolution at which the erosion sim runs (cells per side). The
+    /// pipeline's `global_res` is downsampled to this, the sim runs, and
+    /// the result is upsampled back. 0 = use `global_res` directly. Typical:
+    /// 1024 (~16× faster than 4096 with no visible loss of macro shape).
+    pub erosion_sim_res: u32,
 
-    /// Momentum factor (0..1). 0 = droplet follows the gradient exactly;
-    /// higher = it overshoots and carves flatter valleys.
-    pub erosion_inertia: f32,
+    /// Number of sim iterations. 0 = auto = `ceil(1.4 · sim_res)`, matching
+    /// dandrino's default scaling so changes on one side of the grid have
+    /// time to reach the other.
+    pub erosion_iterations: u32,
 
-    /// Sediment capacity scaling: capacity = slope · speed · water · factor.
-    /// Larger = droplets can carry more sediment → more carving.
-    pub erosion_capacity_factor: f32,
+    /// Sim-space size of one cell. dandrino uses `200 / 512 ≈ 0.39`. Larger
+    /// cell = gentler slope (slope = Δh / cell_width); smaller = steeper.
+    /// Couples to `erosion_repose_slope` and the capacity formula.
+    pub erosion_cell_width: f32,
 
-    /// Minimum effective slope for sediment-capacity calculation, so drops
-    /// on near-flat ground can still pick up sediment.
-    pub erosion_min_slope: f32,
+    /// Per-iteration mean rainfall, multiplied by `cell_area` inside the
+    /// sim. dandrino: 0.0008.
+    pub erosion_rain_rate: f32,
 
-    /// Erosion rate (0..1): fraction of capacity-deficit that actually erodes
-    /// in one step.
-    pub erosion_rate: f32,
-
-    /// Deposition rate (0..1): fraction of excess sediment dropped when over
-    /// capacity.
-    pub erosion_deposition_rate: f32,
-
-    /// Water evaporation per step (0..1).
+    /// Fraction of water removed each iteration. dandrino: 0.0005.
     pub erosion_evaporation_rate: f32,
 
-    /// Erosion brush radius in cells. Erosion and deposition distribute over
-    /// a disk of this radius so gullies are smooth, not single-cell deep.
-    pub erosion_radius_cells: u32,
+    /// Floor for `height_delta / cell_width` in the capacity formula so
+    /// near-flat cells still carry some sediment. dandrino: 0.05.
+    pub erosion_min_height_delta: f32,
+
+    /// Cells whose slope (`|gradient| / cell_width`) exceeds this get
+    /// blurred toward neighbors — a loose angle-of-repose enforcement.
+    /// dandrino: 0.03.
+    pub erosion_repose_slope: f32,
+
+    /// Multiplier from `height_delta / cell_width` to per-cell velocity
+    /// (used in the next iteration's capacity calc). dandrino: 30.0.
+    pub erosion_gravity: f32,
+
+    /// Sediment-capacity scaling constant. Larger = water carries more
+    /// sediment → deeper carving. dandrino: 50.0.
+    pub erosion_sediment_capacity: f32,
+
+    /// Fraction of capacity-deficit dissolved into sediment per iteration
+    /// (i.e. erosion rate, when below capacity). dandrino: 0.25.
+    pub erosion_dissolving_rate: f32,
+
+    /// Fraction of excess sediment deposited per iteration when above
+    /// capacity. dandrino: 0.001.
+    pub erosion_deposition_rate: f32,
 
     // --- Phase 5: settlements ---------------------------------------------
     /// Target number of settlements to place across the world. Greedy
@@ -336,7 +343,6 @@ impl Default for WorldGenConfig {
             global_res: 4096,
             reference_res: 4096,
             sea_ratio: 0.30,
-            mountain_ratio: 0.20,
             continent_frequency: 1.0 / 700.0,
             continent_octaves: 4,
             continent_gain: 0.5,
@@ -353,23 +359,27 @@ impl Default for WorldGenConfig {
             small_island_radius_cells: 90,
             small_island_min_clearance_cells: 150,
             max_elevation_m: 2500.0,
-            base_elevation_m: 500.0,
-            mountain_amplitude_m: 1800.0,
-            plain_amplitude_m: 40.0,
-            mountain_selector_wavelength_cells: 900.0,
-            detail_wavelength_cells: 80.0,
-            mountain_inland_buffer_m: 1500.0,
+            base_elevation_m: 1000.0,
+            initial_relief_amp: 0.4,
+            initial_relief_wavelength_cells: 700.0,
+            initial_relief_octaves: 6,
+            initial_relief_gain: 0.5,
             y_border_wall_cells: 16,
             y_border_wall_height_m: 2200.0,
-            erosion_droplet_count: 300_000,
-            erosion_max_steps: 50,
-            erosion_inertia: 0.05,
-            erosion_capacity_factor: 4.0,
-            erosion_min_slope: 0.01,
-            erosion_rate: 0.3,
-            erosion_deposition_rate: 0.3,
-            erosion_evaporation_rate: 0.02,
-            erosion_radius_cells: 3,
+            // Erosion: dandrino simulation.py defaults. sim_res 1024 keeps
+            // a single preview under ~1 min on a typical workstation while
+            // matching dandrino's visual style.
+            erosion_sim_res: 1024,
+            erosion_iterations: 0,
+            erosion_cell_width: 200.0 / 512.0,
+            erosion_rain_rate: 0.0008,
+            erosion_evaporation_rate: 0.0005,
+            erosion_min_height_delta: 0.05,
+            erosion_repose_slope: 0.03,
+            erosion_gravity: 30.0,
+            erosion_sediment_capacity: 50.0,
+            erosion_dissolving_rate: 0.25,
+            erosion_deposition_rate: 0.001,
             settlement_target_count: 60,
             settlement_min_spacing_cells: 70,
             settlement_max_elevation_m: 1200.0,
@@ -384,10 +394,6 @@ impl Default for WorldGenConfig {
             settlement_max_gap_m: 4000.0,
             river_gap_max_m: 3500.0,
             road_extra_neighbors: 5,
-            // No hand-tuned hotspots/carves by default — Phase 5's coverage-
-            // gap pass guarantees cities everywhere, so engineering mountains
-            // and rivers to attract cities is no longer needed. The struct
-            // types remain available for one-off art-direction tuning.
             elevation_hotspots: vec![],
             river_carve_paths: vec![],
         }

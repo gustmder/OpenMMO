@@ -50,7 +50,7 @@
 |---|------|-----------|------|
 | 1 | 대륙/바다 마스크 | `continent_potential`, `land_mask`, `sea_level_potential` | fBm + 반경 edge falloff + quantile threshold |
 | 2 | 고도 레이어링 | `elevation` (f32 meters) | Phase 1 potential + 산지 마스크(secondary fBm) modulated amplitude |
-| 3 | Hydraulic erosion | `elevation` 갱신, `sediment_map` | Particle-based droplet 시뮬레이션 (수만~수십만 개 drop) |
+| 3 | Hydraulic erosion | `elevation` 갱신 | dandrino grid-field 시뮬레이션 (rain → 정규화 gradient → semi-Lagrangian 이웃 샘플 → capacity 기반 침식/퇴적 → forward advect → gaussian slippage → velocity → evaporate). 1024² 다운샘플로 돌리고 결과를 4096²로 업샘플 |
 | 4 | 하천 추출 | `flow_accumulation`, `rivers: Vec<Polyline>` | Flow field 계산 → 임계값 이상 셀을 trace해 polyline으로 |
 | 5 | 정착지 배치 | `settlements: Vec<Settlement>` | Poisson-disk + 지형 적합도 스코어 (해안/강변/평야 가산점) |
 | 6 | 도로 망 | `roads: Vec<Polyline>` | 정착지 쌍 간 A*, 비용 = 경사 + 강/늪 페널티 |
@@ -158,7 +158,7 @@ cargo run -p terrain-gen --release -- bake --seed 42 --out data/terrain
 - `--sea 0.30` (타겟 해수 비율 → 필터 슬립으로 실측 ~0.37)
 - `--wavelength 700`, `--octaves 4`, `--gain 0.5` (대륙 fBm)
 - `--continents 3`, `--gap 120`, `--islands 15`
-- `--droplets 300000` (Phase 3 erosion)
+- `--erosion-res 1024` (Phase 3 simulation grid; auto = `ceil(1.4 · sim_res)` iterations)
 - `--settlements 60`, `--settlement-spacing 70`
 - Region 범위: `x=[-4,+3] z=[-4,+3]` (8×8 regions = 16,384 tiles)
 
@@ -220,8 +220,6 @@ cargo run -p terrain-gen --release -- bake --seed 42 --out data/terrain
 
 ## 10. 미결정 / 추후 결정
 
-- **Erosion 기법**: particle-based droplet(간단, 튜닝 직관적) vs
-  grid-based stream power(수학적). Phase 3 구현 때 결정.
 - **하천 수원**: 고산 피크에서 시작 vs flow accumulation 임계값으로
   자동. 후자가 더 자연스러움.
 - **도로 곡선화**: A* 출력은 각진 경로. Chaikin smoothing 또는 Catmull-Rom
@@ -301,11 +299,13 @@ cargo run -p terrain-gen --release -- bake --seed 42 --out data/terrain
 - [x] Phase 1: 대륙/바다 마스크 + 프레임워크 (`shared/src/worldgen/`).
       seed 기반 Eden 성장(`growth.rs`)으로 연속 대륙 생성, 작은 섬 필터,
       isthmus cut, 연속 대륙 간 최소 간격 유지까지 포함.
-- [x] Phase 2: 고도 레이어링 (`elevation.rs`). 해안 거리 기반 base
-      gradient + mountain/plain selector noise로 진폭 조절, 남북 경계
-      산맥 벽.
-- [x] Phase 3: Hydraulic erosion (`erosion.rs`). Particle-based droplet
-      시뮬레이션, 브러시 반경으로 gully 스무딩.
+- [x] Phase 2: 고도 레이어링 (`elevation.rs`). 단일 FBM heightmap (land)
+      + 남북 경계 산맥 벽 + config-driven hotspots/carves. 능선/계곡 패턴은
+      이후 erosion이 만들어낸다.
+- [x] Phase 3: Hydraulic erosion (`erosion.rs`). dandrino simulation.py
+      충실 포팅 — 1024² grid에서 ~1434 iter (rain → 정규화 gradient →
+      semi-Lagrangian 이웃 샘플 → capacity 기반 침식/퇴적 → forward advect →
+      gaussian slippage → velocity → evaporate). 결과를 4096²로 업샘플.
 - [x] Phase 4: Flow accumulation + 하천 추출 (`rivers.rs`).
       Barnes 2014 priority-queue pit-fill → D8 flow → peak에서 mouth까지
       trace.

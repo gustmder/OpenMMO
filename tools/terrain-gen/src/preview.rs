@@ -44,21 +44,23 @@ pub fn run(config: &WorldGenConfig, out_root: &Path) -> Result<()> {
         max_elev
     );
 
-    // --- Phase 3: hydraulic erosion -----------------------------------------
-    if config.erosion_droplet_count > 0 {
-        let t_ph3 = Instant::now();
-        erosion::erode_hydraulic(&mut map);
-        let max_post = map
-            .elevation_m
-            .iter()
-            .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-        eprintln!(
-            "Phase 3 (erosion):        {:.2}s  {} droplets, max = {:.0}m",
-            t_ph3.elapsed().as_secs_f32(),
-            config.erosion_droplet_count,
-            max_post
-        );
-    }
+    // --- Phase 3: hydraulic erosion (dandrino sim) --------------------------
+    let t_ph3 = Instant::now();
+    erosion::erode_hydraulic(&mut map);
+    let max_post = map
+        .elevation_m
+        .iter()
+        .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    eprintln!(
+        "Phase 3 (erosion):        {:.2}s  sim_res={}, max = {:.0}m",
+        t_ph3.elapsed().as_secs_f32(),
+        if config.erosion_sim_res == 0 {
+            config.global_res
+        } else {
+            config.erosion_sim_res
+        },
+        max_post
+    );
 
     // --- Phase 4: flow accumulation + river extraction ----------------------
     let t_ph4 = Instant::now();
@@ -144,7 +146,6 @@ pub fn run(config: &WorldGenConfig, out_root: &Path) -> Result<()> {
             "world_size_m": config.world_size_m,
             "global_res": config.global_res,
             "sea_ratio": config.sea_ratio,
-            "mountain_ratio": config.mountain_ratio,
             "continent_frequency": config.continent_frequency,
             "continent_octaves": config.continent_octaves,
             "continent_gain": config.continent_gain,

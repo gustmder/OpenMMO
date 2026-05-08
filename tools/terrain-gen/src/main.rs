@@ -103,9 +103,25 @@ struct GenArgs {
     #[arg(long, default_value_t = 150)]
     island_clearance: u32,
 
-    /// Hydraulic-erosion droplet count. 0 disables.
-    #[arg(long, default_value_t = 300_000)]
-    droplets: u32,
+    /// Erosion sim resolution (cells per side). 0 = use --res. Lower = faster
+    /// but coarser; the result is bilinearly upsampled back to --res.
+    #[arg(long, default_value_t = 1024)]
+    erosion_res: u32,
+
+    /// Number of erosion sim iterations. 0 = auto = ceil(1.4 · sim_res),
+    /// matching dandrino's default.
+    #[arg(long, default_value_t = 0)]
+    erosion_iter: u32,
+
+    /// Pre-erosion FBM amplitude on land, as a fraction of max_elevation_m.
+    /// Higher = more dramatic mountains after erosion.
+    #[arg(long, default_value_t = 0.4)]
+    relief_amp: f32,
+
+    /// Pre-erosion FBM wavelength in global cells. Sets macro mountain
+    /// range spacing.
+    #[arg(long, default_value_t = 700.0)]
+    relief_wavelength: f32,
 
     /// Target city count for Phase 5a.
     #[arg(long, default_value_t = 60)]
@@ -150,7 +166,10 @@ impl GenArgs {
             small_island_count: self.islands,
             small_island_radius_cells: self.island_radius,
             small_island_min_clearance_cells: self.island_clearance,
-            erosion_droplet_count: self.droplets,
+            erosion_sim_res: self.erosion_res,
+            erosion_iterations: self.erosion_iter,
+            initial_relief_amp: self.relief_amp,
+            initial_relief_wavelength_cells: self.relief_wavelength.max(1.0),
             settlement_target_count: self.settlements,
             settlement_min_spacing_cells: self.settlement_spacing.max(1),
             settlement_mouth_count: self.river_mouth_settlements,

@@ -62,15 +62,17 @@ pub fn run(
     elevation::generate_elevation(&mut map);
     eprintln!("  Phase 2 (elevation): {:.2}s", t.elapsed().as_secs_f32());
 
-    if config.erosion_droplet_count > 0 {
-        let t = Instant::now();
-        erosion::erode_hydraulic(&mut map);
-        eprintln!(
-            "  Phase 3 (erosion):   {:.2}s  ({} droplets)",
-            t.elapsed().as_secs_f32(),
-            config.erosion_droplet_count
-        );
-    }
+    let t = Instant::now();
+    erosion::erode_hydraulic(&mut map);
+    eprintln!(
+        "  Phase 3 (erosion):   {:.2}s  (sim_res {})",
+        t.elapsed().as_secs_f32(),
+        if config.erosion_sim_res == 0 {
+            config.global_res
+        } else {
+            config.erosion_sim_res
+        }
+    );
 
     let t = Instant::now();
     let mut river_map = rivers::compute_flow(&map);

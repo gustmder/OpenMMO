@@ -427,63 +427,28 @@ mod tests {
     use super::*;
 
     fn test_config(res: u32, sea_ratio: f32) -> WorldGenConfig {
-        WorldGenConfig {
-            seed: 0xBEEF,
-            world_size_m: 4096,
-            global_res: res,
-            reference_res: res,
-            sea_ratio,
-            mountain_ratio: 0.2,
-            continent_frequency: 1.0 / 64.0,
-            continent_octaves: 5,
-            continent_gain: 0.55,
-            min_island_cells: 0,
-            min_strait_width_cells: 0,
-            sea_channel_strength: 0.0,
-            sea_channel_wavelength: 1000.0,
-            max_isthmus_width_cells: 0,
-            continent_seed_count: 6,
-            continent_seed_min_distance_cells: 20,
-            target_continent_count: 3,
-            continent_gap_cells: 0,
-            small_island_count: 0,
-            small_island_radius_cells: 0,
-            small_island_min_clearance_cells: 0,
-            max_elevation_m: 2500.0,
-            base_elevation_m: 600.0,
-            mountain_amplitude_m: 1500.0,
-            plain_amplitude_m: 150.0,
-            mountain_selector_wavelength_cells: 64.0,
-            detail_wavelength_cells: 16.0,
-            mountain_inland_buffer_m: 0.0,
-            y_border_wall_cells: 0,
-            y_border_wall_height_m: 0.0,
-            erosion_droplet_count: 0,
-            erosion_max_steps: 50,
-            erosion_inertia: 0.05,
-            erosion_capacity_factor: 4.0,
-            erosion_min_slope: 0.01,
-            erosion_rate: 0.3,
-            erosion_deposition_rate: 0.3,
-            erosion_evaporation_rate: 0.02,
-            erosion_radius_cells: 3,
-            settlement_target_count: 5,
-            settlement_min_spacing_cells: 10,
-            settlement_max_elevation_m: 1200.0,
-            settlement_max_slope: 0.35,
-            settlement_river_flow_threshold: 20.0,
-            settlement_along_road_count: 0,
-            settlement_inland_buffer_cells: 0,
-            settlement_coastal_spacing_mult: 1.0,
-            settlement_mouth_count: 0,
-            settlement_phase_a_spacing_mult: 1.0,
-            settlement_south_edge_exclusion_m: 0.0,
-            settlement_max_gap_m: 0.0,
-            river_gap_max_m: 0.0,
-            road_extra_neighbors: 0,
-            elevation_hotspots: Vec::new(),
-            river_carve_paths: Vec::new(),
-        }
+        let mut cfg = WorldGenConfig::default();
+        cfg.seed = 0xBEEF;
+        cfg.world_size_m = 4096;
+        cfg.global_res = res;
+        cfg.reference_res = res;
+        cfg.sea_ratio = sea_ratio;
+        cfg.continent_frequency = 1.0 / 64.0;
+        cfg.continent_octaves = 5;
+        cfg.continent_gain = 0.55;
+        cfg.min_island_cells = 0;
+        cfg.min_strait_width_cells = 0;
+        cfg.continent_seed_count = 6;
+        cfg.continent_seed_min_distance_cells = 20;
+        cfg.target_continent_count = 3;
+        cfg.continent_gap_cells = 0;
+        cfg.small_island_count = 0;
+        cfg.small_island_radius_cells = 0;
+        cfg.small_island_min_clearance_cells = 0;
+        cfg.y_border_wall_cells = 0;
+        cfg.y_border_wall_height_m = 0.0;
+        cfg.river_gap_max_m = 0.0;
+        cfg
     }
 
     #[test]
