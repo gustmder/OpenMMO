@@ -260,24 +260,39 @@ pub(super) fn dim_two_thirds(c: Rgb<u8>) -> Rgb<u8> {
     ])
 }
 
+/// Precompute `hypso_color(elevation/max_h)` for every cell. The 4 feature
+/// PNGs and the elevation-hypso PNG all need the same base color and only
+/// vary in their `dim_land` closure, so caching once lets each writer skip
+/// the per-pixel stop-table walk inside `hypso_color`. Sea cells are filled
+/// too (the value is unused — callers branch on `land_mask`) so the build
+/// loop stays branch-free.
+pub(super) fn build_hypso_cache(map: &GlobalMap) -> Vec<Rgb<u8>> {
+    let max_h = map.config.max_elevation_m.max(1.0);
+    map.elevation_m
+        .iter()
+        .map(|&e| hypso_color(e / max_h))
+        .collect()
+}
+
 /// Fill `img` with a muted hypsometric-tint background: `sea` fill for water
-/// cells, `hypso_color` run through `dim_land` for land. The caller then
-/// overlays whatever content they want (rivers, settlement dots, etc).
+/// cells, `dim_land` applied to the precomputed hypso color for land cells.
+/// `hypso_cache` must have been built from the same `map` (same length =
+/// `global_res²` and same elevation array).
 pub(super) fn paint_hypso_bg<F: Fn(Rgb<u8>) -> Rgb<u8>>(
     img: &mut ImageBuffer<Rgb<u8>, Vec<u8>>,
     map: &GlobalMap,
+    hypso_cache: &[Rgb<u8>],
     sea: Rgb<u8>,
     dim_land: F,
 ) {
     let n = map.config.global_res as usize;
-    let max_h = map.config.max_elevation_m.max(1.0);
     for y in 0..n {
         for x in 0..n {
             let i = y * n + x;
             let px = if map.land_mask[i] == 0 {
                 sea
             } else {
-                dim_land(hypso_color(map.elevation_m[i] / max_h))
+                dim_land(hypso_cache[i])
             };
             img.put_pixel(x as u32, y as u32, px);
         }

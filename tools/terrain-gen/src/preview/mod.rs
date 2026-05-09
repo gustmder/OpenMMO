@@ -200,16 +200,21 @@ pub fn write_pngs(
     // appears only at the actual coastline (not wherever the independent
     // potential noise happens to be low).
     let coast_dist = terrain::coast_distance(&map.land_mask, map.config.global_res as usize);
+    // Hypso color cache: 5 of the 8 PNGs share the same per-cell hypsometric
+    // tint, so compute it once here and thread through to every consumer.
+    // At 4096² this is ~50 MB held until `write_pngs` returns.
+    let hypso_cache = canvas::build_hypso_cache(map);
     terrain::write_potential_png(map, &dir.join("01_potential.png"))?;
     terrain::write_land_sea_png(map, &coast_dist, &dir.join("01_land_sea.png"))?;
     terrain::write_land_sea_shifted_png(map, &coast_dist, &dir.join("01_land_sea_shifted.png"))?;
     terrain::write_elevation_grayscale_png(map, &dir.join("02_elevation.png"))?;
-    terrain::write_elevation_hypso_png(map, &dir.join("02_elevation_hypso.png"))?;
-    features::write_rivers_png(map, river_map, &dir.join("03_rivers.png"))?;
+    terrain::write_elevation_hypso_png(map, &hypso_cache, &dir.join("02_elevation_hypso.png"))?;
+    features::write_rivers_png(map, river_map, &hypso_cache, &dir.join("03_rivers.png"))?;
     features::write_settlements_png(
         map,
         river_map,
         settlements_list,
+        &hypso_cache,
         &dir.join("04_settlements.png"),
     )?;
     features::write_roads_png(
@@ -217,10 +222,11 @@ pub fn write_pngs(
         river_map,
         road_net,
         settlements_list,
+        &hypso_cache,
         &dir.join("05_roads.png"),
     )?;
     let coast_polys = coasts::extract_coasts(&map.land_mask, map.config.global_res as usize);
-    features::write_coasts_png(map, &coast_polys, &dir.join("06_coasts.png"))?;
+    features::write_coasts_png(map, &coast_polys, &hypso_cache, &dir.join("06_coasts.png"))?;
     eprintln!(
         "  wrote PNGs: {:.2}s ({} coast polylines)",
         t.elapsed().as_secs_f32(),

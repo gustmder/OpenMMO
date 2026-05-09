@@ -9,7 +9,9 @@ use image::{ImageBuffer, Rgb};
 use onlinerpg_shared::worldgen::GlobalMap;
 use std::path::Path;
 
-use super::canvas::{finish_png, hypso_color, lerp_u8};
+use std::convert::identity;
+
+use super::canvas::{finish_png, lerp_u8, paint_hypso_bg};
 
 /// Grayscale heightmap: black = sea level / 0m, white = `max_elevation_m`.
 pub(super) fn write_elevation_grayscale_png(map: &GlobalMap, path: &Path) -> Result<()> {
@@ -30,21 +32,17 @@ pub(super) fn write_elevation_grayscale_png(map: &GlobalMap, path: &Path) -> Res
 
 /// Hypsometric tint: deep blue → light blue (sea) → sand → green → brown →
 /// white (mountain peaks). Makes the elevation distribution easy to read.
-pub(super) fn write_elevation_hypso_png(map: &GlobalMap, path: &Path) -> Result<()> {
+/// Reuses the shared `paint_hypso_bg` so the per-pixel land color comes
+/// from the cache built once per `write_pngs` call; passes `identity` for
+/// `dim_land` since this writer wants the raw hypso tint, no dimming.
+pub(super) fn write_elevation_hypso_png(
+    map: &GlobalMap,
+    hypso_cache: &[Rgb<u8>],
+    path: &Path,
+) -> Result<()> {
     let n = map.config.global_res as usize;
-    let max = map.config.max_elevation_m.max(1.0);
     let mut img = ImageBuffer::<Rgb<u8>, Vec<u8>>::new(n as u32, n as u32);
-    for y in 0..n {
-        for x in 0..n {
-            let i = y * n + x;
-            let px = if map.land_mask[i] == 0 {
-                Rgb([40, 85, 155])
-            } else {
-                hypso_color(map.elevation_m[i] / max)
-            };
-            img.put_pixel(x as u32, y as u32, px);
-        }
-    }
+    paint_hypso_bg(&mut img, map, hypso_cache, Rgb([40, 85, 155]), identity);
     finish_png(&mut img, map, path)?;
     Ok(())
 }
