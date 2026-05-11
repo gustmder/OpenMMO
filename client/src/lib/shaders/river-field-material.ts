@@ -161,13 +161,21 @@ export function createRiverFieldMaterial(
       .add(0.3)
     waterColor.mulAssign(waterNightFactor)
 
-    // GB = unit downstream flow vector. Bilinear filtering across the
-    // texel grid blends flow at confluences without a per-fragment branch.
-    const flowDir = riverFieldTex.sample(sampleUV).gb
+    // GB = downstream flow direction (unit) from the bake; bilinear
+    // filtering blends at confluences without a per-fragment branch.
+    // Magnitude is scaled below by bed proximity to sea so the river
+    // decelerates into the mouth — scaling the vector instead of the
+    // time phase keeps neighbouring fragments phase-coherent.
+    const flowSpeed = mix(
+      float(0.3),
+      float(1.0),
+      smoothstep(float(SEA_LEVEL), float(SEA_LEVEL + 1.5), bedHeight)
+    )
+    const flow = riverFieldTex.sample(sampleUV).gb.mul(flowSpeed)
 
     // Ripple normal: world-XZ aligned UVs scrolled along flow.
-    // Two-phase flowmap: `flowDir × uTime` would grow unboundedly, causing
-    // adjacent pixels with slightly different flowDir (Voronoi boundaries,
+    // Two-phase flowmap: `flow × uTime` would grow unboundedly, causing
+    // adjacent pixels with slightly different flow (Voronoi boundaries,
     // confluences) to decorrelate in texture space and develop a vortex
     // artifact. Wrap each phase in [0, 1] and crossfade two half-period-
     // offset phases so the wrap is invisible.
@@ -183,7 +191,7 @@ export function createRiverFieldMaterial(
       driftA: flowOffA,
       driftB: flowOffB,
       mixW: rippleMix,
-    } = buildWrappedDrift(float(0.4), flowDir)
+    } = buildWrappedDrift(float(0.4), flow)
     const nBase1 = vWorldPos.xz.mul(NORMAL_SCALE)
     const nBase2 = vWorldPos.xz.mul(NORMAL_SCALE.mul(0.6)).add(vec2(0.3, 0))
     // `flowScale2` attenuates flow drift on the finer-scale second sample
@@ -253,7 +261,7 @@ export function createRiverFieldMaterial(
     waterColor.assign(mix(waterColor, tintedRefr, refrMix))
 
     // ── Sky reflection (condensed sea pattern) ──
-    // `reflT` is a uniform vertical scroll (no per-pixel flowDir term)
+    // `reflT` is a uniform vertical scroll (no per-pixel flow term)
     // so it stays as `uTime × rate` without flowmap wrapping. The flow-
     // aligned drift reuses `buildWrappedDrift` to keep its phase bounded.
     const WOBBLE_SHAKE_RATE = float(0.05)
@@ -263,7 +271,7 @@ export function createRiverFieldMaterial(
       driftA: reflDriftA,
       driftB: reflDriftB,
       mixW: reflMix,
-    } = buildWrappedDrift(WOBBLE_DRIFT_RATE, flowDir)
+    } = buildWrappedDrift(WOBBLE_DRIFT_RATE, flow)
     const reflBase1 = vWorldPos.xz.mul(NORMAL_SCALE).sub(vec2(0, reflT))
     const reflBase2 = vWorldPos.xz
       .mul(NORMAL_SCALE.mul(0.7))
@@ -345,10 +353,10 @@ export function createRiverFieldMaterial(
     const sparkleT = uTime.mul(0.05)
     const sparkleUV1 = vWorldPos.xz
       .mul(NORMAL_SCALE.mul(2.5))
-      .sub(flowDir.mul(sparkleT))
+      .sub(flow.mul(sparkleT))
     const sparkleUV2 = vWorldPos.xz
       .mul(NORMAL_SCALE.mul(4.0))
-      .add(flowDir.mul(sparkleT.mul(0.6)))
+      .add(flow.mul(sparkleT.mul(0.6)))
     const sp1 = normalMapTex.sample(sparkleUV1).r
     const sp2 = normalMapTex.sample(sparkleUV2).g
     const sunSparkleStrength = smoothstep(float(0), float(0.15), sunY).mul(
