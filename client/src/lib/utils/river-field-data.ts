@@ -1,5 +1,5 @@
 /**
- * RFD1 decoder. Format documented in
+ * RFD1 (River Field Data, version 1) decoder. Format documented in
  * `shared/src/worldgen/tile_bake/river_field.rs`.
  */
 

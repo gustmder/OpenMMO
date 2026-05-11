@@ -2,7 +2,7 @@
 //! direction. The runtime renders one quad per river-bearing tile and
 //! derives every visual effect from this field plus the heightmap.
 //!
-//! Format `RFD1`:
+//! Format `RFD1` (= River Field Data, version 1):
 //!
 //! ```text
 //! header (16 bytes):

@@ -77,22 +77,36 @@
 ```
 shared/src/worldgen/
   mod.rs
-  config.rs          # WorldGenConfig
-  noise.rs           # 결정론적 Perlin + fBm (외부 crate 없음)
-  global_map.rs      # GlobalMap 누적 구조
-  grid.rs            # BFS/min-heap helpers (crate-internal)
-  growth.rs          # Eden 성장 기반 대륙 시드 (Phase 1 sub-pass)
-  continent.rs       # Phase 1
-  elevation.rs       # Phase 2
-  erosion.rs         # Phase 3
-  rivers.rs          # Phase 4
-  settlements.rs     # Phase 5
-  roads.rs           # Phase 6
-  coasts.rs          # 해안 polyline (Marching Squares)
-  tile_bake.rs       # Phase 7 (고해상도 타일 샘플링 + V2 splatmap)
-  vector_features.rs # polyline 공유 유틸 (Chaikin, 공간 인덱스, 거리)
-  vegetation.rs      # Phase 8 (tile별 tree V1 + grass V3 바이너리)
+  config.rs            # WorldGenConfig (TOML 직렬화)
+  noise.rs             # 결정론적 Perlin + fBm (외부 crate 없음)
+  global_map.rs        # GlobalMap 누적 구조
+  grid.rs              # BFS/min-heap helpers (crate-internal)
+  growth.rs            # Eden 성장 기반 대륙 시드 (Phase 1 sub-pass)
+  continent.rs         # Phase 1 (대륙/바다 마스크)
+  elevation.rs         # Phase 2 (고도 + Y-border 산맥 wall + hotspot/carve)
+  erosion.rs           # Phase 3 (dandrino hydraulic erosion)
+  rivers.rs            # Phase 4 (flow → polyline + meander/distributary 후처리)
+  coasts.rs            # 해안 polyline (Marching Squares on land_mask)
+  settlements.rs       # Phase 5 (해안/강변/평야 fitness + greedy min-spacing)
+  roads/               # Phase 6 (MST + K-NN A*; merge_parallel_runs; bridge snap)
+  vector_features.rs   # polyline 공유 유틸 (Chaikin, RiverSegment, projection)
+  vegetation.rs        # Phase 8 (tree V1 + grass V3 per-tile binary)
+  grass_patches.rs     # warped-Voronoi grass patch field
+  tile_bake/           # Phase 7 (per-tile bake)
+    mod.rs             # 오케스트레이션 + BakeContext
+    constants.rs       # TILE_DIM, VERTS_PER_SIDE, HEIGHT_BIAS/STEP, RIVER_* 상수
+    context.rs         # BakeContext — 전역 → 타일 샘플링 캐시
+    heightmap.rs       # 65×65 heightmap 샘플 + flow-aware 강 carve
+    splatmap.rs        # 64×64 V2 splatmap (priority ladder)
+    river_field.rs     # RFD1 (River Field Data v1; surfaceY + flowDir) 바이너리 (강 셰이더 입력)
+    bridges.rs         # bridge deck rectangle flatten
+    settlement_flatten.rs # 정착지 영역 평탄화
 ```
+
+`tile_bake.rs` 가 `tile_bake/` 디렉터리로 분리된 이유: 강·다리·정착지 평탄화·
+스플랫맵·heightmap 이 각각 독립한 한 페이즈가 되어 단일 파일이 비대해졌고,
+정점/픽셀 루프 비용 분석을 모듈별로 가능하게 하려는 의도. RFD1 출력은
+`river_field.rs` 가 단독 책임 — [RIVER_SYSTEM.md](RIVER_SYSTEM.md) 참조.
 
 ## 5. 오프라인 도구: `tools/terrain-gen`
 
@@ -172,11 +186,11 @@ cargo run -p terrain-gen --release -- bake --seed 42 --out data/terrain
 | `elevation.rs` | `smoothstep(0, 0.8, …)` base ramp | 0.8 | 0.4 | 해안→내륙 전환 완만화 |
 | `elevation.rs` | `box_blur_2d(dist_land, r=10)` | 신규 | — | Manhattan BFS ridge artifact 제거 |
 | `elevation.rs` | mountain `base_frac.powi(3)` | 3승 | 1승 | 저지대 산지 진폭 강하게 감쇠, 고지대 그대로 |
-| `tile_bake.rs` | `HILLS_FREQUENCY` | 1/60 m | — | 모든 육지에 60m 파장 구릉 |
-| `tile_bake.rs` | `HILLS_AMPLITUDE_M` | 5.0 | — | 구릉 ±2.5m (30m 거리에 ~5m 기복) |
-| `tile_bake.rs` | `HILLS_OCTAVES`, `HILLS_GAIN` | 3, 0.5 | — | 60/30/15m 옥타브 |
-| `tile_bake.rs` | `HILLS_COASTAL_FADE_M` | 3.0 | — | base=0~3m 구간 구릉 진폭 선형 페이드 → 해안 석호 방지 |
-| `bake.rs` | `min_peak` 배율 | 0.3 | 0.4 | Phase 4 river peak 후보 확장 (~324 polylines) |
+| `tile_bake/constants.rs` | `HILLS_FREQUENCY` | 1/60 m | — | 모든 육지에 60m 파장 구릉 |
+| `tile_bake/constants.rs` | `HILLS_AMPLITUDE_M` | 5.0 | — | 구릉 ±2.5m (30m 거리에 ~5m 기복) |
+| `tile_bake/constants.rs` | `HILLS_OCTAVES`, `HILLS_GAIN` | 3, 0.5 | — | 60/30/15m 옥타브 |
+| `tile_bake/constants.rs` | `HILLS_COASTAL_FADE_M` | 3.0 | — | base=0~3m 구간 구릉 진폭 선형 페이드 → 해안 석호 방지 |
+| `tools/terrain-gen` | `min_peak` 배율 | 0.3 | 0.4 | Phase 4 river peak 후보 확장 (~324 polylines) |
 
 재현 불가능한 요소는 없음 — 동일 커맨드 + 동일 코드에서 동일 바이트가
 나온다 (seed 파생 규칙은 §9). 결과 요약은 `data/terrain/worldgen.json`의
@@ -229,123 +243,84 @@ cargo run -p terrain-gen --release -- bake --seed 42 --out data/terrain
 - **바이옴 구분**: 온도/습도 노이즈로 더 세분(타이가/사막/열대 등)할지.
   현재는 고도/경사/수원 거리만 쓴다.
 
-## 11. 계획: Vector feature distance 리팩토링
+## 11. Vector feature distance (현재 구조)
 
-현재 강/도로/해안은 모두 **raster mask + nearest 또는 bilinear lookup**으로
-분류된다. 이 방식은 4K 전역 맵의 8m 셀 lattice를 최종 결과물에 그대로
-노출한다:
+강 / 도로 / 해안의 위치 정보는 모두 **polyline → world-space 세그먼트
+거리** 로 통일됐다. 옛 방식은 4K 전역 맵의 raster mask(`river_mask`,
+`dist_to_road`, `dist_to_sea`) 를 nearest lookup 해서 8 m 셀 lattice 가
+최종 출력에 그대로 노출됐었다.
 
-- 강: `river_mask[gi] > 0` nearest lookup → 8m 블록 픽셀레이션
-- 도로: `dist_to_road[gi] == 0` nearest lookup → 동일한 계단
-- 해안: `dist_to_sea` BFS가 raster 출처라 isoline이 셀 경계를 따라감.
-  `sample_coast_d_jittered`의 fBm jitter는 hack으로 가리려 했으나 lattice를
-  완전히 깨지 못함.
+공통 구조 ([`vector_features.rs`](../shared/src/worldgen/vector_features.rs)):
 
-핵심 관찰: 세 피처 모두 이미 **벡터 데이터(polyline)로 존재하거나 추출
-가능**하다. 해상도를 올릴 필요 없이 bake 시점에 world-space에서 polyline
-까지의 유클리드 거리로 분류하면 sub-meter 정밀도가 자동으로 나온다.
+1. 출처 polyline 을 **Chaikin smoothing** → 8 m vertex 가 곡선으로.
+2. World-space 세그먼트로 분해. 타일 bake 시 `*_segments_near_tile(bbox, margin)`
+   로 타일 bbox + margin 안에 걸친 세그먼트만 필터 — 타일당 수~수십 개.
+3. `project_point_to_segment(px, pz, ax, az, bx, bz) → (d_sq, t)` 로 정점/픽셀
+   에서 최근접 세그먼트와 projection 파라미터 `t∈[0,1]` 을 얻는다.
+4. 정점별 attribute (width, flow_norm 등) 는 `t` 로 선형 보간.
+5. 결과:
+   - **강 splat/carve**: `tile_bake/heightmap.rs` 가 세그먼트 거리로 폭/깊이
+     보간 carve. RFD1 ([RIVER_SYSTEM.md](RIVER_SYSTEM.md)) 도 같은 세그먼트
+     세트를 본다.
+   - **도로 splat**: priority ladder 의 도로 슬롯이 세그먼트 거리로 결정.
+   - **해안 sand band**: `dist_to_sea` (BFS) 가 `coast_polyline` 세그먼트
+     거리로 치환됨. `sample_coast_d_jittered` 의 fBm jitter hack 도 제거.
 
-### 11.1 통합 해법
+### 11.1 미해결 영역
 
-| Feature | Polyline 출처 | Bake 시점 |
+- **해안 sub-cell smoothing**: `coasts.rs` 의 Marching Squares 는 binary
+  `land_mask` 위에서 동작하므로 vertex 위치가 8 m 격자 ±0.5 셀에 고정된다.
+  Chaikin smoothing 으로 corner 는 깎이지만 staircase 자체는 남아있음.
+  진정한 sub-cell 정밀도를 얻으려면 `continent_potential` (continuous
+  f32 field) 에 isocontour 를 적용해 두 셀의 linear interp 로 vertex 를
+  결정해야 함 — 별개의 큰 작업이라 현재는 보류.
+- **`dist_to_land`**: bathymetry 전용으로 유지. catmull-rom elevation
+  샘플러가 셀당 4×4 이웃을 읽기 때문에 polyline 쿼리로 대체하면 bake
+  시간이 폭증.
+
+## 12. 현재 상태 요약
+
+전체 Phase 1–8 모두 구현 완료 + 프로덕션 사용 중 (`data/terrain/` 에 seed 42
+월드가 베이크되어 있음). 단계별 핵심:
+
+| Phase | 모듈 | 핵심 알고리즘 |
 |---|---|---|
-| 강 | (이미 있음) `RiverMap.rivers: Vec<Polyline>` | 세그먼트 거리 |
-| 도로 | (이미 있음) `RoadNetwork.roads: Vec<Polyline>` | 세그먼트 거리 |
-| 해안 | **Marching Squares on `land_mask`** → coast polylines (신규) | 세그먼트 거리 + `land_mask` sign |
+| 1 — 대륙/바다 | `continent.rs` + `growth.rs` | Eden 성장 + union-find + island filter + isthmus cut. X-periodic. |
+| 2 — 고도 | `elevation.rs` | Single fBm + Y-border 산맥 wall + config hotspots/carves. 능선/계곡은 Phase 3 erosion 이 만든다. |
+| 3 — Erosion | `erosion.rs` | dandrino `simulation.py` 포팅. 1024² grid 에서 `ceil(1.4 · sim_res)` iter, 4096² 로 업샘플. |
+| 4 — 강 | `rivers.rs` | Barnes 2014 pit-fill → D8 → peak trace + meander / distributary / self-overlap 후처리. `seed_river_gap_mountains` 로 강 없는 저지대에 산 추가 → 재추출. |
+| 5 — 정착지 | `settlements.rs` | habitability 필드 (coast/river dist, slope) + 3-phase greedy (drainage basin / island / coverage gap-fill). |
+| 6 — 도로 | `roads/` | Prim MST + K-NN 추가 엣지 + 경사 페널티 A*. `merge_parallel_runs`, `snap_crossings_to_grid` 후처리로 bridge 위치 정렬. |
+| 7 — 타일 베이크 | `tile_bake/` | 65×65 heightmap + 64×64 V2 splatmap + RFD1 강 field (강 있는 타일만). 강 carve = flow-aware depth/width, bed floor clamp. |
+| 8 — 초목 | `vegetation.rs` | Phase 7 의 splatmap vegMeta 바이트(230–249) 를 읽어 tree V1 + grass V3 바이너리를 per-tile 출력. |
 
-공통 구조:
-1. Polyline을 **Chaikin 또는 Catmull-Rom으로 smoothing** → 8m vertex가
-   곡선으로.
-2. 월드 전체 세그먼트를 **2D grid 공간 인덱스**(버킷)로 정렬.
-3. 타일 bake 시 타일 bbox + margin에 걸친 버킷만 조회 → 타일당 수~수십
-   세그먼트만 거리 계산.
-4. Heightmap vertex와 splatmap cell 양쪽에서 `d_m` 사용:
-   - **Splat**: 강 폭 내부 → SAND primary + blend feathering.
-   - **Height carve**: `depth(d) = max_depth * smoothstep(river_width, 0, d)`
-     를 base에서 차감하면 실제 V-channel 생성.
-   - **해안 sand band**: 현재 `coast_d_cells`를 `coast_d_m`로 치환.
+### 12.1 베이크 출력물
 
-### 11.2 제거 대상
+`bake` 명령은 region 범위 내 타일마다 다음을 쓴다:
 
-벡터 거리가 들어오면 다음은 불필요:
-- `BakeContext.river_mask` (rasterized polyline)
-- `BakeContext.dist_to_road` (BFS 결과물)
-- `BakeContext.dist_to_sea`, `dist_to_land` (BFS 결과물)
-- `sample_coast_d_jittered`의 fBm jitter (staircase 가리기용 hack이었음)
+```
+data/terrain/
+  height/r±xx_±zz/h_±xxxxx_±zzzzz.bin   # 65×65 uint16
+  splat/r±xx_±zz/s_±xxxxx_±zzzzz.bin    # 64×64×4 (V2)
+  rivers/r±xx_±zz/r_±xxxxx_±zzzzz.bin   # RFD1 (강 있는 타일만)
+  trees/r±xx_±zz/t_±xxxxx_±zzzzz.bin    # V1
+  grass/r±xx_±zz/g_±xxxxx_±zzzzz.bin    # V3
+  meta/r±xx_±zz.json                    # 팔레트 (region 단위)
+  worldgen.json                         # seed/config/settlements/roads
+```
 
-### 11.3 진행 순서
+### 12.2 Preview 출력물
 
-- [x] **Step 1: 강** — `RiverMap.rivers` Chaikin smooth + 공간 인덱스 +
-      polyline-distance-based splat/carve. `river_mask` 제거. 결과 눈으로
-      확인.
-- [x] **Step 2: 도로** — 동일 구조로 `RoadNetwork.roads`. `dist_to_road` 제거.
-- [ ] **Step 3: 해안 — 보류.** Marching Squares 기반 polyline 추출
-      (`coasts.rs`) 자체는 구현되어 tile_bake까지 통합됐지만, 소스가 binary
-      `land_mask`라 경계가 여전히 8 m 셀에 정렬된다. Chaikin smoothing이
-      corner만 살짝 깎을 뿐 staircase 자체는 시각적으로 거의 그대로
-      남는다. 진정한 sub-cell smooth 해안선을 얻으려면 `continent_potential`
-      (continuous f32 field)에 isocontour를 적용해 vertex 위치를 두 셀
-      값의 linear interp로 결정해야 하는데, 이는 별개의 큰 작업이라
-      현 시점에선 안 하는 쪽으로 결정. 현재 코드는 `land_mask` 기반 MS
-      + polyline distance로 동작하며 `dist_to_sea` / `sample_coast_d_jittered`
-      는 제거된 상태. `dist_to_land`는 bathymetry 전용으로 유지 (catmull-rom
-      elevation 샘플러가 셀당 4×4 이웃을 읽어서 polyline 쿼리로 대체하면
-      bake 시간이 폭증).
+```
+preview_out/<seed>/
+  01_potential.png, 01_land_sea.png, 01_land_sea_shifted.png (X-wrap 검증)
+  02_elevation.png, 02_elevation_hypso.png
+  03_rivers.png, 04_settlements.png, 05_roads.png
+  meta.json
+```
 
-각 단계마다 `terrain-gen bake` 후 클라이언트에서 시각 검증.
+### 12.3 디버깅 도구
 
-## 12. 현재 진행 상황
-
-- [x] Phase 1: 대륙/바다 마스크 + 프레임워크 (`shared/src/worldgen/`).
-      seed 기반 Eden 성장(`growth.rs`)으로 연속 대륙 생성, 작은 섬 필터,
-      isthmus cut, 연속 대륙 간 최소 간격 유지까지 포함.
-- [x] Phase 2: 고도 레이어링 (`elevation.rs`). 단일 FBM heightmap (land)
-      + 남북 경계 산맥 벽 + config-driven hotspots/carves. 능선/계곡 패턴은
-      이후 erosion이 만들어낸다.
-- [x] Phase 3: Hydraulic erosion (`erosion.rs`). dandrino simulation.py
-      충실 포팅 — 1024² grid에서 ~1434 iter (rain → 정규화 gradient →
-      semi-Lagrangian 이웃 샘플 → capacity 기반 침식/퇴적 → forward advect →
-      gaussian slippage → velocity → evaporate). 결과를 4096²로 업샘플.
-- [x] Phase 4: Flow accumulation + 하천 추출 (`rivers.rs`).
-      Barnes 2014 priority-queue pit-fill → D8 flow → peak에서 mouth까지
-      trace.
-- [x] Phase 5: 정착지 배치 (`settlements.rs`). 해안/강변/평야 fitness
-      스코어 + greedy min-spacing으로 habitable 셀에서 top-N 배치.
-      habitability는 elevation + slope 하드 컷오프.
-- [x] Phase 6: 도로 망 (`roads.rs`). Prim MST + K-NN 추가 엣지 (평행 제거)
-      + 경사 페널티 A*. Phase 5b "도로변 마을" 후처리와 결합.
-- [x] Phase 7: 타일 베이크 (`tile_bake.rs`). 전역 맵 bilinear 샘플 +
-      high-freq detail noise + 해저 shallow bathymetry. V2 splatmap 은
-      road > river > sea > alpine > cliff > coast > plain 우선순위로
-      primary/secondary slot + blend 를 결정하고, 평야에는 vegMeta 에
-      short/tall-grass 밀도 bake. 고정 5-슬롯 팔레트 (`rocky_terrain`,
-      `sandy_gravel`, `red_laterite`, `snow_02`, `gravel_road`).
-      **Grass patch mask**: `grass_patches.rs`의 warped-Voronoi 필드
-      (월드 스페이스 jittered grid seed + 도메인 warp, `growth.rs` 축소판).
-      이전 fBm+threshold 마스크는 정규화된 Perlin 출력이 거의 항상 임계값을
-      넘어 단조롭게 덮였는데, 패치 반경·seed 점유율·간격을 숫자로 제어하는
-      방식으로 교체. 패치별 tall/short 플래그로 variant 도 결정.
-- [x] `tools/terrain-gen` 스캐폴딩 및 `preview` / `bake` 명령.
-      `preview` 출력: `01_potential.png`, `01_land_sea.png`,
-      `01_land_sea_shifted.png` (wrap 검증용), `02_elevation.png`,
-      `02_elevation_hypso.png`, `03_rivers.png`, `04_settlements.png`,
-      `05_roads.png`, `meta.json` (정착지 목록 포함).
-      `bake` 출력: `height/r{rx}_{rz}/h_{tx}_{tz}.bin`,
-      `splat/r{rx}_{rz}/s_{tx}_{tz}.bin`, `meta/r{rx}_{rz}.json`,
-      `worldgen.json` (seed/config/settlements/roads). rayon 병렬.
-- [x] Phase 8: 초목/나무 배치 (`vegetation.rs`). Phase 7이 splatmap vegMeta
-      바이트(230–249)에 쓴 밀도를 읽어 per-tile 배치를 베이크:
-      - 나무 V1 바이너리 (`trees/r±xx_±zz/t_±xxxxx_±zzzzz.bin`, 12-byte header
-        + 6 byte/instance): cell당 8% 확률, slope > 1.5 거부, 지형 y < 0.5 m
-        거부, tree.glb/tree2.glb 50:50 선택, 스케일 양자화.
-      - 풀 V3 바이너리 (`grass/r±xx_±zz/g_±xxxxx_±zzzzz.bin`, 16-byte header
-        + 6 byte/instance): short(230–239)/tall(240–249)/flower 3종. Short
-        12×12 blades/cell, tall 10×10, 경계 셀 30% boundary-blend conversion,
-        flower는 sparse short grass에 가중 확률. y < 0.05 m 거부.
-      - 결정론: `tileSeed(tx, tz)` + Mulberry32 (`createRng` 1:1 포팅).
-        클라이언트 `client/src/lib/utils/{tree-data,grass-data}.ts`의 포맷과
-        seed 규칙을 그대로 따르므로 동일 입력(splatmap+heightmap)에서 동일
-        출력이 나온다 (그래도 f32 양자화 차이로 바이트 일치까지는 보장 X,
-        시각적 동치 목표).
-      - 입력 가이드(biome/slope/수원 거리)는 Phase 7 `classify_splat`이 이미
-        vegMeta로 인코딩 중 — slope + highland + coast/river/road water_fade.
+`terrain-gen inspect-tile --seed N --tile-x TX --tile-z TZ` — 지정 타일에
+영향을 주는 강 segment 들을 텍스트로 덤프. `naturalize_river_meanders` /
+`remove_polyline_self_overlaps` 출력 검증용.

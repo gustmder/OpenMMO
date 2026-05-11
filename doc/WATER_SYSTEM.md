@@ -144,9 +144,12 @@ WebGPU TSL(Three.js Shading Language) 노드 기반 커스텀 셰이더.
 | `client/src/lib/managers/refractionRenderManager.ts` | 굴절 렌더 패스 |
 | `client/src/lib/managers/reflectionRenderManager.ts` | 반사 렌더 패스 (ClippingGroup 기반) |
 
-## 7. 향후 확장 *(TODO)*
+## 7. 관련 시스템 & 향후 확장
 
-*   강: [RIVER_SYSTEM.md](RIVER_SYSTEM.md) 설계 참조 (미구현).
-*   호수: 추후.
+*   **강**: [RIVER_SYSTEM.md](RIVER_SYSTEM.md) — 별도 파이프라인 (RFD1
+    per-tile binary + flat quad + 전용 셰이더). 바다 셰이더와 공유 없이
+    독립 동작.
+*   **호수**: 추후. 현재는 강 polyline 종착점이 inland sink 일 때 자연스럽게
+    수면이 평탄해지지만, "큰 호수" 전용 표현은 없음.
 *   수면 높이를 타일/리전별로 다르게 설정 (현재는 전역 Y=0 고정).
 *   파도 높이·방향의 날씨 연동.
