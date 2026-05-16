@@ -52,9 +52,7 @@ pub(super) struct StairCellExpansion {
 
 /// Build the stairwell cell map for A* pathfinding.
 /// Maps (x, z, floor_key) → expansion neighbors along the stair axis.
-pub(super) fn build_stair_cells(
-    cache: &PassabilityCache,
-) -> HashMap<AStarKey, StairCellExpansion> {
+pub(super) fn build_stair_cells(cache: &PassabilityCache) -> HashMap<AStarKey, StairCellExpansion> {
     let mut map = HashMap::new();
 
     for rp in cache.values() {

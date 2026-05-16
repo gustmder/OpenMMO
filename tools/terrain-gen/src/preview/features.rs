@@ -28,7 +28,13 @@ pub(super) fn write_roads_png(
 ) -> Result<()> {
     let n = map.config.global_res as usize;
     let mut img = ImageBuffer::<Rgb<u8>, Vec<u8>>::new(n as u32, n as u32);
-    paint_hypso_bg(&mut img, map, hypso_cache, Rgb([28, 65, 115]), dim_two_thirds);
+    paint_hypso_bg(
+        &mut img,
+        map,
+        hypso_cache,
+        Rgb([28, 65, 115]),
+        dim_two_thirds,
+    );
     for poly in &river_map.rivers {
         for &(x, y) in &poly.points {
             stamp_disk(&mut img, n, x as i32, y as i32, 1, Rgb([70, 140, 210]));
@@ -94,7 +100,13 @@ pub(super) fn write_settlements_png(
 ) -> Result<()> {
     let n = map.config.global_res as usize;
     let mut img = ImageBuffer::<Rgb<u8>, Vec<u8>>::new(n as u32, n as u32);
-    paint_hypso_bg(&mut img, map, hypso_cache, Rgb([28, 65, 115]), dim_two_thirds);
+    paint_hypso_bg(
+        &mut img,
+        map,
+        hypso_cache,
+        Rgb([28, 65, 115]),
+        dim_two_thirds,
+    );
     for poly in &river_map.rivers {
         for &(x, y) in &poly.points {
             stamp_disk(&mut img, n, x as i32, y as i32, 1, Rgb([70, 140, 210]));
@@ -187,7 +199,13 @@ pub(super) fn write_coasts_png(
 ) -> Result<()> {
     let n = map.config.global_res as usize;
     let mut img = ImageBuffer::<Rgb<u8>, Vec<u8>>::new(n as u32, n as u32);
-    paint_hypso_bg(&mut img, map, hypso_cache, Rgb([28, 65, 115]), dim_two_thirds);
+    paint_hypso_bg(
+        &mut img,
+        map,
+        hypso_cache,
+        Rgb([28, 65, 115]),
+        dim_two_thirds,
+    );
     let coast_color = Rgb([255, 110, 40]);
     // 4096-res map → 4 px disk, 1024-res → 1 px. Matches `overlay_region_grid`.
     let radius = ((n as f32 / 1024.0).round() as i32).max(1);

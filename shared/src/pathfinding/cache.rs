@@ -6,8 +6,8 @@
 use crate::housing::{HouseData, RoomData, RoomType, WallDirection, WallVariant};
 
 use super::{
-    PassabilityCache, RuntimeFloorGrid, RuntimePassability, StairwellInfo, EDGE_E, EDGE_N,
-    EDGE_S, EDGE_W,
+    PassabilityCache, RuntimeFloorGrid, RuntimePassability, StairwellInfo, EDGE_E, EDGE_N, EDGE_S,
+    EDGE_W,
 };
 
 const FLOOR_THICKNESS: f32 = 0.1;

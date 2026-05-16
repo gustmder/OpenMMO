@@ -8,7 +8,7 @@
 
 use super::super::grid::fold_x_delta;
 use super::super::rivers::RiverMap;
-use super::axis::{SnapAxis, pick_river_axis};
+use super::axis::{pick_river_axis, SnapAxis};
 use super::RoadNetwork;
 
 /// Number of cells on each side of a road↔river crossing forced into a

@@ -9,13 +9,13 @@
 use std::collections::BinaryHeap;
 
 use super::super::global_map::GlobalMap;
-use super::super::grid::{MinF32, fold_x_delta_f32};
+use super::super::grid::{fold_x_delta_f32, MinF32};
 use super::super::rivers::RiverMap;
 use super::super::tile_bake::river_geom::{
     flow_log_inv, flow_to_width, mouth_fan_factor, BRIDGE_MAX_BAKED_WIDTH_M,
     RIVER_MOUTH_FAN_ARC_CELLS,
 };
-use super::axis::{SnapAxis, pick_river_axis, step_axis};
+use super::axis::{pick_river_axis, step_axis, SnapAxis};
 
 /// Linear penalty per unit grade applied to every road step, scaled by the
 /// step's horizontal length in cells. At a 5 % grade this adds
@@ -131,8 +131,7 @@ impl RiverField {
             }
             let total_arc = cumulative;
             let (end_x, end_y) = pts[n - 1];
-            let mouth_in_sea =
-                map.land_mask[(end_y as usize) * res + (end_x as usize)] == 0;
+            let mouth_in_sea = map.land_mask[(end_y as usize) * res + (end_x as usize)] == 0;
 
             for i in 0..n {
                 let (x, y) = pts[i];
@@ -327,10 +326,7 @@ pub(super) fn a_star(
                 }
                 // Wide cells are impassable except as start/goal so a
                 // settlement on a wide cell can still terminate a road.
-                if ni != start
-                    && ni != goal
-                    && river_field.mask[ni] == MASK_WIDE
-                {
+                if ni != start && ni != goal && river_field.mask[ni] == MASK_WIDE {
                     continue;
                 }
                 let is_diag = dx.abs() + dy.abs() == 2;

@@ -20,17 +20,16 @@ use super::super::vector_features::{
 use super::constants::{
     COAST_CHAIKIN_ITERATIONS, MOUTH_ISLAND_BEND_AMP_M, MOUTH_ISLAND_COUNT_MAX,
     MOUTH_ISLAND_COUNT_MIN, MOUTH_ISLAND_END_ALONG_FRAC_MAX, MOUTH_ISLAND_END_ALONG_FRAC_MIN,
-    MOUTH_ISLAND_PEAK_MAX_M, MOUTH_ISLAND_PEAK_MIN_M,
-    MOUTH_ISLAND_PERP_JITTER_M, MOUTH_ISLAND_RADIUS_MAX_M, MOUTH_ISLAND_RADIUS_MIN_M,
-    MOUTH_ISLAND_SPACING_M, MOUTH_ISLAND_SPREAD_FRAC, MOUTH_ISLAND_TIP_ALONG_FRAC_MAX,
-    MOUTH_ISLAND_TIP_ALONG_FRAC_MIN, MOUTH_ISLAND_TIP_LATERAL_FRAC,
-    MOUTH_ISLAND_TIP_RADIUS_FRAC, MOUTH_ISLAND_WIDEST_AXIS_T, RIVER_CHAIKIN_ITERATIONS,
-    RIVER_MAX_WIDTH_M, RIVER_MIN_WIDTH_M, RIVER_MOUTH_FAN_ARC_CELLS,
+    MOUTH_ISLAND_PEAK_MAX_M, MOUTH_ISLAND_PEAK_MIN_M, MOUTH_ISLAND_PERP_JITTER_M,
+    MOUTH_ISLAND_RADIUS_MAX_M, MOUTH_ISLAND_RADIUS_MIN_M, MOUTH_ISLAND_SPACING_M,
+    MOUTH_ISLAND_SPREAD_FRAC, MOUTH_ISLAND_TIP_ALONG_FRAC_MAX, MOUTH_ISLAND_TIP_ALONG_FRAC_MIN,
+    MOUTH_ISLAND_TIP_LATERAL_FRAC, MOUTH_ISLAND_TIP_RADIUS_FRAC, MOUTH_ISLAND_WIDEST_AXIS_T,
+    RIVER_CHAIKIN_ITERATIONS, RIVER_MAX_WIDTH_M, RIVER_MIN_WIDTH_M, RIVER_MOUTH_FAN_ARC_CELLS,
     RIVER_MOUTH_FAN_BANK_WOBBLE_M, RIVER_MOUTH_FAN_BANK_WOBBLE_WAVELENGTH_M,
     ROAD_CHAIKIN_ITERATIONS,
 };
-use super::river_geom::mouth_fan_factor;
 use super::heightmap::{cell_elevation_m, lerp};
+use super::river_geom::mouth_fan_factor;
 
 pub struct BakeContext {
     /// Deterministic detail-noise source seeded off the master seed.
@@ -309,17 +308,16 @@ fn generate_mouth_islands(
             // near the banks via `SPREAD_FRAC`. Small jitter breaks the
             // perfect-lattice silhouette.
             let perp_offset = (slot_t * 2.0 - 1.0) * mouth_half * MOUTH_ISLAND_SPREAD_FRAC;
-            let perp_jitter = rng.gen_range(-MOUTH_ISLAND_PERP_JITTER_M..MOUTH_ISLAND_PERP_JITTER_M);
+            let perp_jitter =
+                rng.gen_range(-MOUTH_ISLAND_PERP_JITTER_M..MOUTH_ISLAND_PERP_JITTER_M);
             let lateral = perp_offset + perp_jitter;
 
             // Tip sits around mid-fan, end near the mouth — fingers reach
             // halfway up the wedge before fanning out to the open mouth.
-            let tip_frac = rng.gen_range(
-                MOUTH_ISLAND_TIP_ALONG_FRAC_MIN..=MOUTH_ISLAND_TIP_ALONG_FRAC_MAX,
-            );
-            let end_frac = rng.gen_range(
-                MOUTH_ISLAND_END_ALONG_FRAC_MIN..=MOUTH_ISLAND_END_ALONG_FRAC_MAX,
-            );
+            let tip_frac =
+                rng.gen_range(MOUTH_ISLAND_TIP_ALONG_FRAC_MIN..=MOUTH_ISLAND_TIP_ALONG_FRAC_MAX);
+            let end_frac =
+                rng.gen_range(MOUTH_ISLAND_END_ALONG_FRAC_MIN..=MOUTH_ISLAND_END_ALONG_FRAC_MAX);
             let tip_along = tip_frac * fan_arc_m;
             let end_along = end_frac * fan_arc_m;
 
@@ -425,11 +423,8 @@ fn apply_mouth_fan_widths(
                     let frac = (lens[i] - apex_arc) / zone_arc;
                     let straight_x = apex[0] + dx_axis * frac;
                     let straight_y = apex[1] + dy_axis * frac;
-                    let noise = bank_noise.sample(
-                        straight_x * wobble_freq,
-                        straight_y * wobble_freq,
-                        0.0,
-                    );
+                    let noise =
+                        bank_noise.sample(straight_x * wobble_freq, straight_y * wobble_freq, 0.0);
                     let wobble = noise * RIVER_MOUTH_FAN_BANK_WOBBLE_M * frac;
                     poly.points[i][0] = straight_x + perp_x * wobble;
                     poly.points[i][1] = straight_y + perp_y * wobble;

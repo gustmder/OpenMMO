@@ -14,7 +14,7 @@
 use std::collections::{BinaryHeap, HashMap};
 
 use super::global_map::GlobalMap;
-use super::grid::{MinF32, fold_x_delta};
+use super::grid::{fold_x_delta, MinF32};
 
 /// Peak elevation threshold (as a fraction of `max_elevation_m`) for
 /// `extract_rivers` to treat a local maximum as a river source. Shared
@@ -371,9 +371,7 @@ fn naturalize_river_meanders(map: &GlobalMap, rivers: &mut [Polyline]) {
         // Arc distance from each vertex to its nearest anchor — drives the
         // taper that prevents kinks at confluences.
         let anchor_dist = anchor_distance_along_polyline(&cumulative, &anchor_flags);
-        let taper_len = MEANDER_ANCHOR_TAPER_CELLS
-            .min(total_len * 0.5)
-            .max(1.0);
+        let taper_len = MEANDER_ANCHOR_TAPER_CELLS.min(total_len * 0.5).max(1.0);
 
         // Phase-randomize per polyline so adjacent rivers don't bend in
         // lockstep — the seed mix is the same recipe the previous code used.
@@ -426,8 +424,7 @@ fn naturalize_river_meanders(map: &GlobalMap, rivers: &mut [Polyline]) {
             let ny = tx;
 
             let flow_norm = (poly.flow[i].max(1.0).log2() / log_max_flow).clamp(0.0, 1.0);
-            let amp_cells = MEANDER_BASE_AMPLITUDE_CELLS
-                + MEANDER_FLOW_AMPLITUDE_CELLS * flow_norm;
+            let amp_cells = MEANDER_BASE_AMPLITUDE_CELLS + MEANDER_FLOW_AMPLITUDE_CELLS * flow_norm;
 
             // Two-octave sinusoidal noise on arc length: long-wavelength
             // primary carries the visible bend, optional shorter-wavelength
@@ -435,8 +432,8 @@ fn naturalize_river_meanders(map: &GlobalMap, rivers: &mut [Polyline]) {
             // any wavelength much shorter than ~1 km reads as small
             // wiggles rather than a meander at world scale.
             let s = cumulative[i];
-            let wave_a = (s / MEANDER_PRIMARY_WAVELENGTH_CELLS * std::f32::consts::TAU + phase)
-                .sin();
+            let wave_a =
+                (s / MEANDER_PRIMARY_WAVELENGTH_CELLS * std::f32::consts::TAU + phase).sin();
             let wave_b = (s / MEANDER_SECONDARY_WAVELENGTH_CELLS * std::f32::consts::TAU
                 + phase * 1.73)
                 .sin()
@@ -1002,7 +999,6 @@ fn merge_overlapping_polylines(map: &GlobalMap, rivers: &mut Vec<Polyline>) {
     // (e.g. one whose interior overlapped another from vertex 1).
     rivers.retain(|p| p.points.len() >= 2);
 }
-
 
 #[cfg(test)]
 mod tests {

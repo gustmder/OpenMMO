@@ -160,9 +160,7 @@ pub fn passability_is_cardinal_move_blocked(
     dz: i32,
     floor_level: u8,
 ) -> bool {
-    with_cache(|c| {
-        pathfinding::is_cardinal_move_blocked(c, cell_x, cell_z, dx, dz, floor_level)
-    })
+    with_cache(|c| pathfinding::is_cardinal_move_blocked(c, cell_x, cell_z, dx, dz, floor_level))
 }
 
 #[wasm_bindgen]

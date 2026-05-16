@@ -34,7 +34,7 @@ use super::global_map::GlobalMap;
 use super::rivers::RiverMap;
 use super::settlements::Settlement;
 
-use astar::{AStarScratch, RiverField, a_star};
+use astar::{a_star, AStarScratch, RiverField};
 use graph::{canonical, euclidean_sq, pair_cos_at, prim_mst, redirect_parallel_forks};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -322,8 +322,7 @@ mod tests {
             .expect("segment present, file is written");
 
         let pixel_surface = |i: usize, j: usize| -> f32 {
-            let off = RIVER_FIELD_HEADER_SIZE
-                + (j * VERTS_PER_SIDE + i) * RIVER_FIELD_PIXEL_SIZE;
+            let off = RIVER_FIELD_HEADER_SIZE + (j * VERTS_PER_SIDE + i) * RIVER_FIELD_PIXEL_SIZE;
             let s = u16::from_le_bytes([bin[off], bin[off + 1]]);
             s as f32 * HEIGHT_STEP - HEIGHT_BIAS
         };
@@ -347,11 +346,13 @@ mod tests {
 
         // Flow direction propagates to every pixel so ripples are
         // continuous. Segment runs +X so flowX≈+127.
-        let off = RIVER_FIELD_HEADER_SIZE
-            + (60 * VERTS_PER_SIDE + 32) * RIVER_FIELD_PIXEL_SIZE;
+        let off = RIVER_FIELD_HEADER_SIZE + (60 * VERTS_PER_SIDE + 32) * RIVER_FIELD_PIXEL_SIZE;
         let flow_x = bin[off + 2] as i8;
         let flow_z = bin[off + 3] as i8;
-        assert!(flow_x > 100, "far pixel should still carry flowX, got {flow_x}");
+        assert!(
+            flow_x > 100,
+            "far pixel should still carry flowX, got {flow_x}"
+        );
         assert!(flow_z.abs() < 10, "flowZ should stay near 0, got {flow_z}");
     }
 
@@ -397,10 +398,9 @@ mod tests {
             .expect("non-empty segments produce a file");
         let last_col = VERTS_PER_SIDE - 1;
         for j in 0..VERTS_PER_SIDE {
-            let a_off = RIVER_FIELD_HEADER_SIZE
-                + (j * VERTS_PER_SIDE + last_col) * RIVER_FIELD_PIXEL_SIZE;
-            let b_off =
-                RIVER_FIELD_HEADER_SIZE + (j * VERTS_PER_SIDE) * RIVER_FIELD_PIXEL_SIZE;
+            let a_off =
+                RIVER_FIELD_HEADER_SIZE + (j * VERTS_PER_SIDE + last_col) * RIVER_FIELD_PIXEL_SIZE;
+            let b_off = RIVER_FIELD_HEADER_SIZE + (j * VERTS_PER_SIDE) * RIVER_FIELD_PIXEL_SIZE;
             assert_eq!(
                 &bin_a[a_off..a_off + RIVER_FIELD_PIXEL_SIZE],
                 &bin_b[b_off..b_off + RIVER_FIELD_PIXEL_SIZE],

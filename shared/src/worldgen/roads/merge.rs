@@ -297,13 +297,16 @@ pub fn merge_parallel_interiors(road_net: &mut RoadNetwork, res: usize) {
         if a.lo_start >= a.lo_end || a.hi_start >= a.hi_end {
             continue;
         }
-        let trunk_segment: Vec<(u32, u32)> = road_net.roads[lo].points[a.lo_start..=a.lo_end].to_vec();
+        let trunk_segment: Vec<(u32, u32)> =
+            road_net.roads[lo].points[a.lo_start..=a.lo_end].to_vec();
         let segment: Vec<(u32, u32)> = if a.hi_descending {
             trunk_segment.into_iter().rev().collect()
         } else {
             trunk_segment
         };
-        road_net.roads[hi].points.splice(a.hi_start..=a.hi_end, segment);
+        road_net.roads[hi]
+            .points
+            .splice(a.hi_start..=a.hi_end, segment);
         claimed[lo] = true;
         claimed[hi] = true;
         applied += 1;
