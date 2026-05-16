@@ -234,6 +234,21 @@ enum Cmd {
         #[arg(long, allow_hyphen_values = true)]
         tile_z: i32,
     },
+
+    /// Decompose the baked height at one or more world (x, z) points:
+    /// natural surface, nearest river segment params, carve, island bump.
+    ProbePoint {
+        #[command(flatten)]
+        gen: GenArgs,
+        /// World coordinates as `x,z` pairs (repeat the flag for multiple points).
+        #[arg(
+            long = "at",
+            value_name = "X,Z",
+            required = true,
+            allow_hyphen_values = true
+        )]
+        at: Vec<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -268,9 +283,27 @@ fn main() -> Result<()> {
                 (region_x_max, region_z_max),
             )
         }
-        Cmd::InspectTile { gen, tile_x, tile_z } => {
+        Cmd::InspectTile {
+            gen,
+            tile_x,
+            tile_z,
+        } => {
             let cfg = gen.into_config();
             inspect::run(&cfg, tile_x, tile_z)
+        }
+        Cmd::ProbePoint { gen, at } => {
+            let cfg = gen.into_config();
+            let mut points = Vec::new();
+            for raw in &at {
+                let parts: Vec<&str> = raw.split(',').collect();
+                if parts.len() != 2 {
+                    anyhow::bail!("--at expects 'X,Z', got '{}'", raw);
+                }
+                let x: f32 = parts[0].trim().parse()?;
+                let z: f32 = parts[1].trim().parse()?;
+                points.push((x, z));
+            }
+            inspect::probe(&cfg, &points)
         }
     }
 }

@@ -18,6 +18,7 @@ use super::global_map::GlobalMap;
 use super::grid::bfs_distance_from;
 use super::rivers::{Polyline, RiverMap};
 use super::roads::RoadNetwork;
+use super::tile_bake::river_geom::wide_river_cell_mask;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Settlement {
@@ -33,6 +34,11 @@ pub struct HabitabilityFields {
     pub coast_dist: Vec<u16>,
     pub slope: Vec<f32>,
     pub dist_to_river: Vec<u16>,
+    /// Cells that sit on a river polyline whose predicted baked width
+    /// exceeds the bridge-buildable cap (same gate road A* uses). Marked
+    /// uninhabitable so settlements aren't seated mid-channel on delta
+    /// fans / wide estuaries.
+    pub wide_river: Vec<bool>,
 }
 
 pub fn compute_habitability_fields(map: &GlobalMap, river_map: &RiverMap) -> HabitabilityFields {
@@ -43,10 +49,12 @@ pub fn compute_habitability_fields(map: &GlobalMap, river_map: &RiverMap) -> Hab
     let river_thresh = cfg.settlement_river_flow_threshold.max(1.0);
     let river_mask = extracted_river_mask(map, river_map, river_thresh);
     let dist_to_river = bfs_distance_from(&river_mask, res, 1, None);
+    let wide_river = wide_river_cell_mask(map, river_map);
     HabitabilityFields {
         coast_dist,
         slope,
         dist_to_river,
+        wide_river,
     }
 }
 
@@ -90,9 +98,7 @@ pub fn place_settlements_with_fields(
         return Vec::new();
     }
     let HabitabilityFields {
-        coast_dist,
-        slope,
-        dist_to_river: _,
+        coast_dist, slope, ..
     } = fields;
 
     let ctx = FitnessCtx::from_config(map, fields);
@@ -460,6 +466,9 @@ fn habitable(i: usize, map: &GlobalMap, slope: &[f32], ctx: &FitnessCtx) -> bool
     if map.land_mask[i] != 1 || map.elevation_m[i] > ctx.max_elev || slope[i] > ctx.max_slope {
         return false;
     }
+    if ctx.wide_river[i] {
+        return false;
+    }
     let cy = i / map.config.global_res as usize;
     cy <= ctx.max_cy
 }
@@ -526,6 +535,7 @@ struct FitnessCtx<'a> {
     coast_dist: &'a [u16],
     slope: &'a [f32],
     dist_to_river: &'a [u16],
+    wide_river: &'a [bool],
     max_slope: f32,
     max_elev: f32,
     /// Largest cell-y (inclusive) that passes habitability. Cells with
@@ -550,6 +560,7 @@ impl FitnessCtx<'_> {
             coast_dist: &fields.coast_dist,
             slope: &fields.slope,
             dist_to_river: &fields.dist_to_river,
+            wide_river: &fields.wide_river,
             max_slope: cfg.settlement_max_slope,
             max_elev: cfg.settlement_max_elevation_m,
             max_cy,
@@ -600,9 +611,7 @@ pub fn place_settlements_along_roads_with_fields(
     let cfg = &map.config;
     let res = cfg.global_res as usize;
     let HabitabilityFields {
-        coast_dist,
-        slope,
-        dist_to_river: _,
+        coast_dist, slope, ..
     } = fields;
     let ctx = FitnessCtx::from_config(map, fields);
 

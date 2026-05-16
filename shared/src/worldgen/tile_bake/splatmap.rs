@@ -802,7 +802,7 @@ mod tests {
         let max_half_width = RIVER_MAX_WIDTH_M * 0.5;
         let max_taper = RIVER_CARVE_TAPER_MIN_M + RIVER_CARVE_TAPER_EXTRA_M;
         let max_sand = RIVER_MAX_WIDTH_M * RIVER_SAND_WIDTH_MULT;
-        let river_margin = (max_half_width + max_taper).max(max_sand + RIVER_FADE_SPAN_M);
+        let river_margin = super::super::river_margin_m();
         assert!(
             river_margin >= max_sand + RIVER_FADE_SPAN_M,
             "margin {} does not cover fade span {}",
@@ -831,10 +831,7 @@ mod tests {
             flow_norm: vec![0.5, 0.5],
             width: vec![4.0, 4.0],
         }];
-        let max_half_width = RIVER_MAX_WIDTH_M * 0.5;
-        let max_taper = RIVER_CARVE_TAPER_MIN_M + RIVER_CARVE_TAPER_EXTRA_M;
-        let max_sand = RIVER_MAX_WIDTH_M * RIVER_SAND_WIDTH_MULT;
-        let margin = (max_half_width + max_taper).max(max_sand + RIVER_FADE_SPAN_M);
+        let margin = super::super::river_margin_m();
         let near_tile_0 = river_segments_near_tile(&polys, -32.0, -16.0, 32.0, 16.0, margin);
         assert_eq!(near_tile_0.len(), 1, "tile 0 must see segment at x=0.5");
         let polys2 = vec![RiverWorldPolyline {

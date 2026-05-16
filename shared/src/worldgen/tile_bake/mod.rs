@@ -22,10 +22,10 @@
 
 pub mod bridges;
 mod constants;
-pub mod river_geom;
 mod context;
 mod heightmap;
 mod river_field;
+pub mod river_geom;
 pub mod settlement_flatten;
 mod splatmap;
 
@@ -42,6 +42,45 @@ pub use context::BakeContext;
 use context::MouthIsland;
 pub use river_field::bake_river_field;
 
+/// Decomposed height-sample result for one world point. Each field is one
+/// step of `sample_elevation_m` / `carve_at_point`, surfaced so the
+/// `terrain-gen probe-point` CLI can show how a vertex got to its final
+/// value.
+#[derive(Debug, Clone, Copy)]
+pub struct PointProbe {
+    pub world_x: f32,
+    pub world_z: f32,
+    pub global_cell: (i32, i32),
+    pub land_mask: u8,
+    pub dist_to_land: u16,
+    pub natural_height: f32,
+    pub final_height: f32,
+    pub river: Option<NearestRiver>,
+    pub mouth_island_bump: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct NearestRiver {
+    pub seg_idx: usize,
+    pub t: f32,
+    pub d_m: f32,
+    pub signed_d_m: f32,
+    pub width: f32,
+    pub flow_norm: f32,
+    pub half_width: f32,
+    pub taper: f32,
+    pub depth_uncapped: f32,
+    pub bed_floor: f32,
+    pub max_carve_depth: f32,
+    pub carve: f32,
+}
+
+/// Compute a `PointProbe` for `(wx, wz)`, matching what
+/// `apply_river_carve_to_tile` would have written to the tile heightmap.
+pub fn probe_point(map: &GlobalMap, ctx: &BakeContext, wx: f32, wz: f32) -> PointProbe {
+    heightmap::probe_point_impl(map, ctx, wx, wz)
+}
+
 use constants::{
     COAST_FADE_SPAN_M, COAST_SAND_M, RIVER_CARVE_TAPER_EXTRA_M, RIVER_CARVE_TAPER_MIN_M,
     RIVER_FADE_SPAN_M, RIVER_MOUTH_FAN_EXTRA, RIVER_SAND_WIDTH_MULT, ROAD_FADE_SPAN_M,
@@ -49,6 +88,21 @@ use constants::{
 };
 use heightmap::{apply_river_carve_to_tile, encode_heightmap, sample_tile_heights_no_carve};
 use splatmap::bake_splatmap;
+
+/// Largest radius at which any river segment can still affect a tile vertex
+/// (carve taper or splat fade). Computed from the global maxima so every
+/// caller — bake, splat, diagnostic probes — agrees on which segments to
+/// pull in around a given point. The fan flare at the mouth pushes the
+/// effective half-width to `MAX_WIDTH * (1 + FAN_EXTRA)`; clipping the
+/// margin to the natural max would drop adjacent-tile segments inside
+/// wide wedges and leave seams in the visible bank.
+#[inline]
+pub fn river_margin_m() -> f32 {
+    let max_half_width = RIVER_MAX_WIDTH_M * (1.0 + RIVER_MOUTH_FAN_EXTRA) * 0.5;
+    let max_taper = RIVER_CARVE_TAPER_MIN_M + RIVER_CARVE_TAPER_EXTRA_M;
+    let max_sand_half_width = RIVER_MAX_WIDTH_M * RIVER_SAND_WIDTH_MULT;
+    (max_half_width + max_taper).max(max_sand_half_width + RIVER_FADE_SPAN_M)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BakedTile {
@@ -86,18 +140,7 @@ pub fn bake_tile_with_bridges(
     let tile_max_x = tile_min_x + TILE_DIM as f32;
     let tile_max_z = tile_min_z + TILE_DIM as f32;
 
-    // Margin = largest radius at which any river segment can still affect
-    // this tile (carve taper or splat fade). Computed from the global
-    // maxima — a tile with only narrow source streams still uses the
-    // worldwide reach so neighbors agree on the shared cells. The fan
-    // flare at the mouth pushes the effective half-width to
-    // `MAX_WIDTH * (1 + FAN_EXTRA)`; clipping the margin to the natural
-    // max would drop adjacent-tile segments inside wide wedges and leave
-    // seams in the visible bank.
-    let max_half_width = RIVER_MAX_WIDTH_M * (1.0 + RIVER_MOUTH_FAN_EXTRA) * 0.5;
-    let max_taper = RIVER_CARVE_TAPER_MIN_M + RIVER_CARVE_TAPER_EXTRA_M;
-    let max_sand_half_width = RIVER_MAX_WIDTH_M * RIVER_SAND_WIDTH_MULT;
-    let river_margin = (max_half_width + max_taper).max(max_sand_half_width + RIVER_FADE_SPAN_M);
+    let river_margin = river_margin_m();
     let river_segs = river_segments_near_tile(
         &ctx.rivers_world,
         tile_min_x,
@@ -349,5 +392,4 @@ mod tests {
             );
         }
     }
-
 }

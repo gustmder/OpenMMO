@@ -2,9 +2,7 @@
 
 use super::super::global_map::GlobalMap;
 use super::super::noise::fbm_wrap_x;
-use super::super::vector_features::{
-    nearest_river_segment, river_segments_near_tile, RiverSegment,
-};
+use super::super::vector_features::{nearest_river_segment, RiverSegment};
 use super::constants::{
     DETAIL_COAST_DAMP, DETAIL_FREQUENCY, DETAIL_GAIN, DETAIL_LACUNARITY, DETAIL_MAX_AMPLITUDE,
     DETAIL_MIN_AMPLITUDE, DETAIL_OCTAVES, HEIGHT_BIAS, HEIGHT_STEP, HILLS_AMPLITUDE_M,
@@ -209,36 +207,13 @@ fn smooth_island_area(
     }
 }
 
-/// Sample the baked elevation at a single world point — same pipeline as
-/// `sample_tile_heights` but for one isolated query (e.g. bridge bank
-/// probes). Pulls only the river segments within a small AABB around the
-/// probe so the cost stays O(handful) regardless of world size. Mouth-
-/// island bumps are skipped: bank probes sit past the channel edge, well
-/// outside any island reach.
-pub(super) fn sample_height_single(map: &GlobalMap, ctx: &BakeContext, wx: f32, wz: f32) -> f32 {
-    use super::constants::{
-        RIVER_CARVE_TAPER_EXTRA_M, RIVER_CARVE_TAPER_MIN_M, RIVER_FADE_SPAN_M, RIVER_MAX_WIDTH_M,
-        RIVER_SAND_WIDTH_MULT,
-    };
-    // Peak fan-flared half-width drives the margin so cells far from the
-    // polyline (in a wide mouth wedge) still see the segment they're
-    // perpendicular to.
-    let max_half = RIVER_MAX_WIDTH_M * (1.0 + RIVER_MOUTH_FAN_EXTRA) * 0.5;
-    let max_taper = RIVER_CARVE_TAPER_MIN_M + RIVER_CARVE_TAPER_EXTRA_M;
-    let max_sand_half = RIVER_MAX_WIDTH_M * RIVER_SAND_WIDTH_MULT;
-    let river_margin = (max_half + max_taper).max(max_sand_half + RIVER_FADE_SPAN_M);
-    let segs = river_segments_near_tile(&ctx.rivers_world, wx, wz, wx, wz, river_margin);
-    let world_size = map.config.world_size_m as f32;
-    let inv_mpc = 1.0 / map.config.meters_per_cell();
-    sample_elevation_m(map, ctx, wx, wz, world_size, inv_mpc, &segs, &[])
-}
-
-/// Like `sample_height_single` but skips the river carve so the read is
-/// the natural ground surface (base + detail + hills). Used for bridge
-/// deck-end probes: those points can fall *inside* the river carve taper,
-/// where the carved bank reads several meters below the natural surface
-/// the bridge actually wants to sit on. Mouth-island bumps stay off for
-/// the same reason as `sample_height_single`.
+/// Sample the natural (un-carved) ground surface at a single world point —
+/// base + detail + hills, no river carve, no mouth-island bump. Used by
+/// bridge deck-end probes (those points can fall *inside* the river carve
+/// taper, where the carved bank reads several meters below the natural
+/// surface the bridge actually wants to sit on) and by the settlement-pad
+/// `target_y` so a pad center that happens to land near a wide river still
+/// resolves to land elevation rather than the river's carved bed.
 pub(super) fn sample_natural_height_single(
     map: &GlobalMap,
     ctx: &BakeContext,
@@ -248,6 +223,42 @@ pub(super) fn sample_natural_height_single(
     let world_size = map.config.world_size_m as f32;
     let inv_mpc = 1.0 / map.config.meters_per_cell();
     sample_elevation_no_carve(map, ctx, wx, wz, world_size, inv_mpc, &[])
+}
+
+pub(super) fn probe_point_impl(
+    map: &GlobalMap,
+    ctx: &BakeContext,
+    wx: f32,
+    wz: f32,
+) -> super::PointProbe {
+    use super::super::vector_features::river_segments_near_tile;
+
+    let cfg = &map.config;
+    let world_size = cfg.world_size_m as f32;
+    let inv_mpc = 1.0 / cfg.meters_per_cell();
+    let res = cfg.global_res as i32;
+    let gx = (((wx + world_size * 0.5) * inv_mpc).floor() as i32).rem_euclid(res);
+    let gy = (((wz + world_size * 0.5) * inv_mpc).floor() as i32).clamp(0, res - 1);
+    let cell_idx = gy as usize * res as usize + gx as usize;
+
+    let natural = sample_elevation_no_carve(map, ctx, wx, wz, world_size, inv_mpc, &[]);
+    let segs = river_segments_near_tile(&ctx.rivers_world, wx, wz, wx, wz, super::river_margin_m());
+    let river = carve_at_point_detailed(wx, wz, natural, &segs);
+    let carve = river.map(|n| n.carve).unwrap_or(0.0);
+    let bump = max_island_bump_at(wx, wz, &ctx.mouth_islands);
+    let final_height = (natural - carve + bump).clamp(-HEIGHT_BIAS, cfg.max_elevation_m);
+
+    super::PointProbe {
+        world_x: wx,
+        world_z: wz,
+        global_cell: (gx, gy),
+        land_mask: map.land_mask[cell_idx],
+        dist_to_land: ctx.dist_to_land[cell_idx],
+        natural_height: natural,
+        final_height,
+        river,
+        mouth_island_bump: bump,
+    }
 }
 
 pub(super) fn encode_heightmap(heights: &[f32]) -> Vec<u8> {
@@ -371,8 +382,7 @@ fn sample_elevation_m(
     river_segs: &[RiverSegment],
     mouth_islands: &[MouthIsland],
 ) -> f32 {
-    let natural =
-        sample_elevation_no_carve(map, ctx, world_x, world_z, world_size, inv_mpc, &[]);
+    let natural = sample_elevation_no_carve(map, ctx, world_x, world_z, world_size, inv_mpc, &[]);
     let carve = carve_at_point(world_x, world_z, natural, river_segs);
     let bump = max_island_bump_at(world_x, world_z, mouth_islands);
     let max_cap = map.config.max_elevation_m;
@@ -389,9 +399,24 @@ fn sample_elevation_m(
 /// and rise above the waterline as visible bars.
 #[inline]
 fn carve_at_point(world_x: f32, world_z: f32, current_h: f32, segs: &[RiverSegment]) -> f32 {
-    let Some((d, idx, t)) = nearest_river_segment(world_x, world_z, segs) else {
-        return 0.0;
-    };
+    carve_at_point_detailed(world_x, world_z, current_h, segs)
+        .map(|n| n.carve)
+        .unwrap_or(0.0)
+}
+
+/// Same carve as `carve_at_point` but also returns the intermediate values
+/// (segment match, width, taper, bed floor, etc.) for diagnostics. Used by
+/// `probe_point_impl` so the CLI breakdown stays in lockstep with the carve
+/// the bake actually applied. Production hot path calls `carve_at_point`
+/// which discards the detail struct (LLVM elides the unused fields).
+#[inline]
+fn carve_at_point_detailed(
+    world_x: f32,
+    world_z: f32,
+    current_h: f32,
+    segs: &[RiverSegment],
+) -> Option<super::NearestRiver> {
+    let (d, idx, t) = nearest_river_segment(world_x, world_z, segs)?;
     let seg = &segs[idx];
     let flow_norm = lerp(seg.flow_norm_a, seg.flow_norm_b, t);
     let width = lerp(seg.width_a, seg.width_b, t);
@@ -400,7 +425,7 @@ fn carve_at_point(world_x: f32, world_z: f32, current_h: f32, segs: &[RiverSegme
     let max_carve_depth = (current_h - bed_floor).max(0.0);
     let signed_d = signed_distance_to_segment(world_x, world_z, seg, t);
     let outside_strength = bend_outside_strength(segs, idx, t);
-    river_carve_capped_m(
+    let carve = river_carve_capped_m(
         d,
         signed_d,
         outside_strength,
@@ -408,7 +433,21 @@ fn carve_at_point(world_x: f32, world_z: f32, current_h: f32, segs: &[RiverSegme
         taper,
         depth,
         max_carve_depth,
-    )
+    );
+    Some(super::NearestRiver {
+        seg_idx: idx,
+        t,
+        d_m: d,
+        signed_d_m: signed_d,
+        width,
+        flow_norm,
+        half_width,
+        taper,
+        depth_uncapped: depth,
+        bed_floor,
+        max_carve_depth,
+        carve,
+    })
 }
 
 /// Bed-floor target in meters as a function of vertex width. At natural

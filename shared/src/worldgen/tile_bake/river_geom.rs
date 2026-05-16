@@ -3,6 +3,9 @@
 //! at heightmap/splatmap time; road A* uses the same formulas to predict
 //! where bridges would land too wide and detour around them.
 
+use super::super::global_map::GlobalMap;
+use super::super::grid::fold_x_delta_f32;
+use super::super::rivers::RiverMap;
 use super::constants::{
     RIVER_MAX_WIDTH_M, RIVER_MIN_WIDTH_M, RIVER_MOUTH_FAN_EXTRA, RIVER_MOUTH_FAN_SHARPNESS,
 };
@@ -71,4 +74,56 @@ pub fn mouth_fan_factor(t: f32) -> f32 {
 #[inline]
 pub fn baked_to_visible_width(baked: f32) -> f32 {
     baked * RIVER_RIBBON_WIDTH_SCALE + RIVER_RIBBON_WIDTH_PAD_M * 2.0
+}
+
+/// Per-cell boolean mask: `true` where any river polyline's predicted baked
+/// width (flow → width with the mouth-fan multiplier applied) exceeds
+/// [`BRIDGE_MAX_BAKED_WIDTH_M`]. Mirrors the gate road A* applies in
+/// [`crate::worldgen::roads::astar::RiverField`], so consumers like settlement
+/// placement can refuse to seat a village on the same cell road A* would
+/// detour around.
+pub fn wide_river_cell_mask(map: &GlobalMap, river_map: &RiverMap) -> Vec<bool> {
+    let res = map.config.global_res as usize;
+    let total = res * res;
+    let mut out = vec![false; total];
+    let res_f = res as f32;
+    let inv_log_max = flow_log_inv(river_map.max_flow());
+    let inv_arc = 1.0 / RIVER_MOUTH_FAN_ARC_CELLS.max(1e-3);
+
+    for poly in &river_map.rivers {
+        let pts = &poly.points;
+        let n = pts.len();
+        if n < 2 {
+            continue;
+        }
+        let mut lens: Vec<f32> = Vec::with_capacity(n);
+        lens.push(0.0);
+        let mut cumulative = 0.0f32;
+        for i in 1..n {
+            let (px, py) = pts[i - 1];
+            let (qx, qy) = pts[i];
+            let dx = fold_x_delta_f32(qx as f32 - px as f32, res_f);
+            let dy = qy as f32 - py as f32;
+            cumulative += (dx * dx + dy * dy).sqrt();
+            lens.push(cumulative);
+        }
+        let total_arc = cumulative;
+        let (end_x, end_y) = pts[n - 1];
+        let mouth_in_sea = map.land_mask[(end_y as usize) * res + (end_x as usize)] == 0;
+
+        for i in 0..n {
+            let (x, y) = pts[i];
+            let idx = (y as usize) * res + (x as usize);
+            let base_w = flow_to_width(poly.flow[i], inv_log_max);
+            let mouth_factor = if mouth_in_sea {
+                mouth_fan_factor((total_arc - lens[i]) * inv_arc)
+            } else {
+                1.0
+            };
+            if base_w * mouth_factor > BRIDGE_MAX_BAKED_WIDTH_M {
+                out[idx] = true;
+            }
+        }
+    }
+    out
 }

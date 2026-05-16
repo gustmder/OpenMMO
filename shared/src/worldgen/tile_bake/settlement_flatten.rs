@@ -5,9 +5,9 @@
 //! untouched (roads, sand, dirt etc. paint through normally) — this is a
 //! geometry-only pass run after `sample_tile_heights`.
 //!
-//! Target Y is the natural-terrain sample at the settlement center via
-//! `sample_height_single`, taken once per settlement so adjacent tiles that
-//! share the same circle agree at the seam.
+//! Target Y is the un-carved natural sample at the settlement center
+//! (`sample_natural_height_single`), so a pad centered near a river never
+//! inherits the carved bed and sinks the village underwater.
 
 use std::collections::HashMap;
 
@@ -17,7 +17,7 @@ use super::super::noise::{smoothstep, PerlinNoise3D};
 use super::super::settlements::Settlement;
 use super::constants::VERTS_PER_SIDE;
 use super::context::BakeContext;
-use super::heightmap::sample_height_single;
+use super::heightmap::sample_natural_height_single;
 
 /// Inner radius (m) at which the heightmap is held exactly at `target_y`.
 pub const SETTLEMENT_FLAT_RADIUS_M: f32 = 30.0;
@@ -48,9 +48,9 @@ const OUTER_SQ: f32 = REACH_M * REACH_M;
 
 #[derive(Debug, Clone)]
 pub struct SettlementFlatten {
-    center_x: f32,
-    center_z: f32,
-    target_y: f32,
+    pub center_x: f32,
+    pub center_z: f32,
+    pub target_y: f32,
 }
 
 /// Build the deduped list of flatten directives — one per settlement, with
@@ -71,7 +71,7 @@ pub fn build_directives(
         .map(|s| {
             let cx = (s.cell_x as f32 + 0.5) * mpc - half;
             let cz = (s.cell_y as f32 + 0.5) * mpc - half;
-            let target_y = sample_height_single(map, ctx, cx, cz);
+            let target_y = sample_natural_height_single(map, ctx, cx, cz);
             SettlementFlatten {
                 center_x: cx,
                 center_z: cz,
@@ -106,7 +106,7 @@ pub fn group_flattens_by_tile(
 /// the un-flattened terrain at `(wx, wz)`; for points outside every pad the
 /// function returns it unchanged. Used by bridge bank probes so they read
 /// the same pad surface the per-tile bake will write.
-pub(super) fn flatten_height_at(
+pub fn flatten_height_at(
     wx: f32,
     wz: f32,
     natural: f32,
