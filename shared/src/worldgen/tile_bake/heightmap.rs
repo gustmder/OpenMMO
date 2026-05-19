@@ -11,7 +11,7 @@ use super::constants::{
     RIVER_CARVE_TAPER_EXTRA_M, RIVER_CARVE_TAPER_MIN_M, RIVER_MAX_WIDTH_M,
     RIVER_MOUTH_FAN_BED_DROP_M, RIVER_MOUTH_FAN_EXTRA, TILE_DIM, VERTS_PER_SIDE,
 };
-use super::context::{BakeContext, MouthIsland};
+use super::context::BakeContext;
 
 const RIVER_BEND_TURN_FULL_STRENGTH_RAD: f32 = std::f32::consts::FRAC_PI_4;
 const RIVER_BEND_OUTER_DEPTH_EXTRA: f32 = 0.30;
@@ -27,7 +27,6 @@ pub(super) fn sample_tile_heights_no_carve(
     ctx: &BakeContext,
     tx: i32,
     tz: i32,
-    mouth_islands: &[MouthIsland],
 ) -> Vec<f32> {
     let cfg = &map.config;
     let world_size = cfg.world_size_m as f32;
@@ -37,38 +36,26 @@ pub(super) fn sample_tile_heights_no_carve(
     let tile_origin_x = tx as f32 * TILE_DIM as f32 - TILE_DIM as f32 * 0.5;
     let tile_origin_z = tz as f32 * TILE_DIM as f32 - TILE_DIM as f32 * 0.5;
 
-    let sample_world = |wx: f32, wz: f32| {
-        sample_elevation_no_carve(map, ctx, wx, wz, world_size, inv_mpc, mouth_islands)
-    };
     for j in 0..VERTS_PER_SIDE {
         for i in 0..VERTS_PER_SIDE {
             let world_x = tile_origin_x + i as f32;
             let world_z = tile_origin_z + j as f32;
-            heights[j * VERTS_PER_SIDE + i] = sample_world(world_x, world_z);
+            heights[j * VERTS_PER_SIDE + i] =
+                sample_elevation_no_carve(map, ctx, world_x, world_z, world_size, inv_mpc);
         }
     }
-    smooth_island_area(
-        &mut heights,
-        tile_origin_x,
-        tile_origin_z,
-        mouth_islands,
-        sample_world,
-    );
     heights
 }
 
 /// Per-vertex river carve subtraction. Runs after settlement flattening
 /// so the carve cuts through the settlement pad too — the channel keeps
 /// its natural depth even where the pad raised the surrounding terrain.
-/// Mouth-island bumps are stripped before sizing the cut and re-added
-/// on top so a bar's peak stays above the carved bed.
 pub(super) fn apply_river_carve_to_tile(
     heights: &mut [f32],
     map: &GlobalMap,
     tile_origin_x: f32,
     tile_origin_z: f32,
     river_segs: &[RiverSegment],
-    mouth_islands: &[MouthIsland],
 ) {
     if river_segs.is_empty() {
         return;
@@ -79,136 +66,15 @@ pub(super) fn apply_river_carve_to_tile(
             let wx = tile_origin_x + i as f32;
             let wz = tile_origin_z + j as f32;
             let idx = j * VERTS_PER_SIDE + i;
-            let h = heights[idx];
-            let bump = max_island_bump_at(wx, wz, mouth_islands);
-            let natural = h - bump;
+            let natural = heights[idx];
             let carve = carve_at_point(wx, wz, natural, river_segs);
-            heights[idx] = (natural - carve + bump).clamp(-HEIGHT_BIAS, max_cap);
-        }
-    }
-}
-
-#[inline]
-fn max_island_bump_at(wx: f32, wz: f32, islands: &[MouthIsland]) -> f32 {
-    let mut bump = 0.0f32;
-    for island in islands {
-        if (wx - island.center[0]).abs() > island.reach_m
-            || (wz - island.center[1]).abs() > island.reach_m
-        {
-            continue;
-        }
-        let h = island.bump_m(wx, wz);
-        if h > bump {
-            bump = h;
-        }
-    }
-    bump
-}
-
-/// 3×3 Gaussian approximation, σ ≈ 0.85, sum = 16.
-const KERNEL: [[u32; 3]; 3] = [[1, 2, 1], [2, 4, 2], [1, 2, 1]];
-const KERNEL_SUM: f32 = 16.0;
-
-/// Convolve the 3×3 kernel against `src` centered at `(ci, cj)`. Caller
-/// owns bounds checking — the kernel reads `ci±1, cj±1`.
-#[inline]
-fn blur3x3(src: &[f32], stride: usize, ci: usize, cj: usize) -> f32 {
-    let mut acc = 0.0f32;
-    for dj in 0..3 {
-        for di in 0..3 {
-            let ni = ci + di - 1;
-            let nj = cj + dj - 1;
-            acc += src[nj * stride + ni] * KERNEL[dj][di] as f32;
-        }
-    }
-    acc / KERNEL_SUM
-}
-
-/// Two-pass 3×3 Gaussian blur applied only to vertices inside any
-/// mouth-island's reach (plus a small margin to fade the surf-chop
-/// wobble just beyond the bump). Two tight passes preserve the bar
-/// crown better than a single wide kernel.
-///
-/// Seam-safe: the 2-vertex out-of-tile ring is re-sampled via
-/// `sample_world`, and neighbouring tiles sampling the same world
-/// positions for their own rings produce matching seam output.
-fn smooth_island_area(
-    heights: &mut [f32],
-    tile_origin_x: f32,
-    tile_origin_z: f32,
-    islands: &[MouthIsland],
-    sample_world: impl Fn(f32, f32) -> f32,
-) {
-    if islands.is_empty() {
-        return;
-    }
-    const BLUR_EXTRA_M: f32 = 2.0;
-    let mut mask = vec![false; VERTS_PER_SIDE * VERTS_PER_SIDE];
-    let mut any_masked = false;
-    for j in 0..VERTS_PER_SIDE {
-        for i in 0..VERTS_PER_SIDE {
-            let wx = tile_origin_x + i as f32;
-            let wz = tile_origin_z + j as f32;
-            for island in islands {
-                let r = island.reach_m + BLUR_EXTRA_M;
-                let dx = wx - island.center[0];
-                let dz = wz - island.center[1];
-                if (dx * dx + dz * dz) <= r * r {
-                    mask[j * VERTS_PER_SIDE + i] = true;
-                    any_masked = true;
-                    break;
-                }
-            }
-        }
-    }
-    if !any_masked {
-        return;
-    }
-
-    // Extended grid (VERTS+4)² with a 2-vertex ring of out-of-tile
-    // samples so both 3×3 passes feed identical neighbourhoods on both
-    // sides of a shared seam.
-    const RING: usize = 2;
-    const EXT: usize = VERTS_PER_SIDE + 2 * RING;
-    let mut ext = vec![0.0f32; EXT * EXT];
-    let vps_i32 = VERTS_PER_SIDE as i32;
-    let ring_i32 = RING as i32;
-    for ej in 0..EXT {
-        for ei in 0..EXT {
-            let i = ei as i32 - ring_i32;
-            let j = ej as i32 - ring_i32;
-            if i >= 0 && i < vps_i32 && j >= 0 && j < vps_i32 {
-                ext[ej * EXT + ei] = heights[j as usize * VERTS_PER_SIDE + i as usize];
-            } else {
-                ext[ej * EXT + ei] =
-                    sample_world(tile_origin_x + i as f32, tile_origin_z + j as f32);
-            }
-        }
-    }
-
-    // Pass 1: blur EXT into MID, leaving a 1-vertex border of blurred
-    // values around the 65² region for pass 2.
-    const MID: usize = VERTS_PER_SIDE + 2;
-    let mut mid = vec![0.0f32; MID * MID];
-    for mj in 0..MID {
-        for mi in 0..MID {
-            mid[mj * MID + mi] = blur3x3(&ext, EXT, mi + 1, mj + 1);
-        }
-    }
-
-    // Pass 2: blur MID into masked positions of `heights`.
-    for j in 0..VERTS_PER_SIDE {
-        for i in 0..VERTS_PER_SIDE {
-            if !mask[j * VERTS_PER_SIDE + i] {
-                continue;
-            }
-            heights[j * VERTS_PER_SIDE + i] = blur3x3(&mid, MID, i + 1, j + 1);
+            heights[idx] = (natural - carve).clamp(-HEIGHT_BIAS, max_cap);
         }
     }
 }
 
 /// Sample the natural (un-carved) ground surface at a single world point —
-/// base + detail + hills, no river carve, no mouth-island bump. Used by
+/// base + detail + hills, no river carve. Used by
 /// bridge deck-end probes (those points can fall *inside* the river carve
 /// taper, where the carved bank reads several meters below the natural
 /// surface the bridge actually wants to sit on) and by the settlement-pad
@@ -222,7 +88,7 @@ pub(super) fn sample_natural_height_single(
 ) -> f32 {
     let world_size = map.config.world_size_m as f32;
     let inv_mpc = 1.0 / map.config.meters_per_cell();
-    sample_elevation_no_carve(map, ctx, wx, wz, world_size, inv_mpc, &[])
+    sample_elevation_no_carve(map, ctx, wx, wz, world_size, inv_mpc)
 }
 
 pub(super) fn probe_point_impl(
@@ -241,12 +107,11 @@ pub(super) fn probe_point_impl(
     let gy = (((wz + world_size * 0.5) * inv_mpc).floor() as i32).clamp(0, res - 1);
     let cell_idx = gy as usize * res as usize + gx as usize;
 
-    let natural = sample_elevation_no_carve(map, ctx, wx, wz, world_size, inv_mpc, &[]);
+    let natural = sample_elevation_no_carve(map, ctx, wx, wz, world_size, inv_mpc);
     let segs = river_segments_near_tile(&ctx.rivers_world, wx, wz, wx, wz, super::river_margin_m());
     let river = carve_at_point_detailed(wx, wz, natural, &segs);
     let carve = river.map(|n| n.carve).unwrap_or(0.0);
-    let bump = max_island_bump_at(wx, wz, &ctx.mouth_islands);
-    let final_height = (natural - carve + bump).clamp(-HEIGHT_BIAS, cfg.max_elevation_m);
+    let final_height = (natural - carve).clamp(-HEIGHT_BIAS, cfg.max_elevation_m);
 
     super::PointProbe {
         world_x: wx,
@@ -257,7 +122,6 @@ pub(super) fn probe_point_impl(
         natural_height: natural,
         final_height,
         river,
-        mouth_island_bump: bump,
     }
 }
 
@@ -273,7 +137,7 @@ pub(super) fn encode_heightmap(heights: &[f32]) -> Vec<u8> {
 }
 
 /// Same pipeline as `sample_elevation_m` but without the river carve —
-/// returns the natural surface (base + detail + hills + island bump).
+/// returns the natural surface (base + detail + hills).
 /// The carve is applied as a separate per-vertex pass so settlement pads
 /// can raise the surface first; the carve then cuts through whatever
 /// height ended up above the river polyline.
@@ -284,7 +148,6 @@ fn sample_elevation_no_carve(
     world_z: f32,
     world_size: f32,
     inv_mpc: f32,
-    mouth_islands: &[MouthIsland],
 ) -> f32 {
     let base_raw = catmull_rom_wrap_x(map, world_x, world_z, world_size, inv_mpc, |i| {
         cell_elevation_m(map, &ctx.dist_to_land, i)
@@ -334,21 +197,8 @@ fn sample_elevation_no_carve(
         0.0
     };
 
-    let pre_carve = base + detail + hills;
-    let mut island_bump = 0.0f32;
-    for island in mouth_islands {
-        if (world_x - island.center[0]).abs() > island.reach_m
-            || (world_z - island.center[1]).abs() > island.reach_m
-        {
-            continue;
-        }
-        let h = island.bump_m(world_x, world_z);
-        if h > island_bump {
-            island_bump = h;
-        }
-    }
     let max_cap = map.config.max_elevation_m;
-    (pre_carve + island_bump).clamp(-HEIGHT_BIAS, max_cap)
+    (base + detail + hills).clamp(-HEIGHT_BIAS, max_cap)
 }
 
 /// Carved bed elevation at `(wx, wz)` using the caller's pre-filtered
@@ -366,7 +216,7 @@ pub(super) fn sample_carved_bed(
 ) -> f32 {
     let world_size = map.config.world_size_m as f32;
     let inv_mpc = 1.0 / map.config.meters_per_cell();
-    sample_elevation_m(map, ctx, wx, wz, world_size, inv_mpc, river_segs, &[])
+    sample_elevation_m(map, ctx, wx, wz, world_size, inv_mpc, river_segs)
 }
 
 /// Bilinear-sample the global elevation at a world position, convert sea
@@ -380,13 +230,11 @@ fn sample_elevation_m(
     world_size: f32,
     inv_mpc: f32,
     river_segs: &[RiverSegment],
-    mouth_islands: &[MouthIsland],
 ) -> f32 {
-    let natural = sample_elevation_no_carve(map, ctx, world_x, world_z, world_size, inv_mpc, &[]);
+    let natural = sample_elevation_no_carve(map, ctx, world_x, world_z, world_size, inv_mpc);
     let carve = carve_at_point(world_x, world_z, natural, river_segs);
-    let bump = max_island_bump_at(world_x, world_z, mouth_islands);
     let max_cap = map.config.max_elevation_m;
-    (natural - carve + bump).clamp(-HEIGHT_BIAS, max_cap)
+    (natural - carve).clamp(-HEIGHT_BIAS, max_cap)
 }
 
 /// River carve depth (m, ≥0) to subtract from `current_h` at the given world
@@ -395,8 +243,7 @@ fn sample_elevation_m(
 /// taper gradient the river shader needs for edge fade. Inside the mouth
 /// fan zone (detected via width excess over the natural max), the floor
 /// drops below sea level so the channel reads as shallow-sea bathymetry
-/// — finger islands' upstream tips can then sit on that submerged plain
-/// and rise above the waterline as visible bars.
+/// in the estuary fan.
 #[inline]
 fn carve_at_point(world_x: f32, world_z: f32, current_h: f32, segs: &[RiverSegment]) -> f32 {
     carve_at_point_detailed(world_x, world_z, current_h, segs)

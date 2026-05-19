@@ -637,7 +637,8 @@ impl SharedState {
     pub fn face_monster_command(&self, monster_id: &str) -> Option<ClientMessage> {
         let monster = self.nearby_monsters.get(monster_id)?;
         let self_player = self.self_player.as_ref()?;
-        let to_monster = crate::geom::PlanarDelta::between(&self_player.position, &monster.position);
+        let to_monster =
+            crate::geom::PlanarDelta::between(&self_player.position, &monster.position);
         Some(ClientMessage::PlayerMove {
             position: self_player.position.clone(),
             rotation: to_monster.rotation(),

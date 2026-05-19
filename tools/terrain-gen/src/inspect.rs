@@ -202,16 +202,12 @@ pub fn probe(config: &WorldGenConfig, points: &[(f32, f32)]) -> Result<()> {
             p.global_cell.0, p.global_cell.1, p.land_mask, p.dist_to_land
         );
         println!(
-            "  natural height (no carve, no bump): {:+7.3} m",
+            "  natural height (no carve):          {:+7.3} m",
             p.natural_height
         );
         println!(
-            "  final height (carve + bump):        {:+7.3} m",
+            "  final height (carve):               {:+7.3} m",
             p.final_height
-        );
-        println!(
-            "  mouth-island bump:                  {:+7.3} m",
-            p.mouth_island_bump
         );
         match p.river {
             None => println!("  nearest river: NONE (no segment within margin)"),

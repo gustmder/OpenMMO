@@ -140,9 +140,7 @@ pub async fn llm_driver(
     }
 
     // Send initial world state only if human players are nearby and NPC is not sleeping
-    let is_sleeping = active_schedule
-        .0
-        .is_some_and(|i| schedule[i].is_sleeping());
+    let is_sleeping = active_schedule.0.is_some_and(|i| schedule[i].is_sleeping());
     {
         let mut s = state.lock().await;
         if is_sleeping {
@@ -215,9 +213,7 @@ pub async fn llm_driver(
             active_schedule =
                 check_schedule_transition(&state, &schedule, active_schedule, &label).await;
         }
-        let is_sleeping = active_schedule
-            .0
-            .is_some_and(|i| schedule[i].is_sleeping());
+        let is_sleeping = active_schedule.0.is_some_and(|i| schedule[i].is_sleeping());
         let has_scheduled_action = active_schedule
             .0
             .is_some_and(|i| schedule[i].action.is_some());

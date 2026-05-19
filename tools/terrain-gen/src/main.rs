@@ -236,7 +236,7 @@ enum Cmd {
     },
 
     /// Decompose the baked height at one or more world (x, z) points:
-    /// natural surface, nearest river segment params, carve, island bump.
+    /// natural surface, nearest river segment params, and carve.
     ProbePoint {
         #[command(flatten)]
         gen: GenArgs,

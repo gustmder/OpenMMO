@@ -133,9 +133,13 @@ pub(super) async fn chase_monster(
             let to_monster = PlanarDelta::between(&player.position, &monster.position);
             let in_range = to_monster.dist <= ATTACK_RANGE;
 
-            let monster_shift =
-                PlanarDelta::xz(last_monster_x, last_monster_z, monster.position.x, monster.position.z)
-                    .dist;
+            let monster_shift = PlanarDelta::xz(
+                last_monster_x,
+                last_monster_z,
+                monster.position.x,
+                monster.position.z,
+            )
+            .dist;
             let needs_repath = path_waypoints.is_empty()
                 || path_index >= path_waypoints.len()
                 || monster_shift > REROUTE_THRESHOLD;

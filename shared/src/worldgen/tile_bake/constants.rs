@@ -135,75 +135,10 @@ pub(super) const RIVER_MOUTH_FAN_BANK_WOBBLE_M: f32 = 3.0;
 pub(super) const RIVER_MOUTH_FAN_BANK_WOBBLE_WAVELENGTH_M: f32 = 20.0;
 /// Drop of the river-bed floor below `RIVER_CARVE_MIN_BED_Y_M` in the fan
 /// zone, proportional to width excess. At the fan peak the bed sits at
-/// `-RIVER_MOUTH_FAN_BED_DROP_M` so the channel reads as shallow sea —
-/// finger islands sit on this submerged plain and rise above sea level.
+/// `-RIVER_MOUTH_FAN_BED_DROP_M` so the channel reads as shallow sea.
 pub(super) const RIVER_MOUTH_FAN_BED_DROP_M: f32 = 1.5;
 pub(super) const RIVER_SAND_WIDTH_MULT: f32 = 0.7;
 
-// --- Mouth finger-islands ------------------------------------------------
-// Procedural sandy bars scattered inside each river's estuary fan. Rise
-// above the carved channel floor (sitting at `RIVER_CARVE_MIN_BED_Y_M`
-// near the mouth) as elongated capsules aligned with the apex flow
-// direction. The splatmap's mouth-pebble retraction already paints them
-// SAND since they sit inside the river band where the post-fan width
-// is well past `RIVER_FAN_SAND_BASE_WIDTH_M`.
-pub(super) const MOUTH_ISLAND_COUNT_MIN: u32 = 3;
-pub(super) const MOUTH_ISLAND_COUNT_MAX: u32 = 8;
-/// Target along-mouth spacing (m): the actual island count is the
-/// mouth width divided by this, clamped to `[MIN, MAX]`. ~16 m gives
-/// ~6 bars across a ~100 m mouth (typical large-river post-fan width)
-/// — sparse enough that each bar reads as an individual island rather
-/// than a packed lattice.
-pub(super) const MOUTH_ISLAND_SPACING_M: f32 = 16.0;
-/// Fraction of the mouth's half-width across which island lateral
-/// positions are spread. <1 leaves a margin near the channel banks so
-/// bars stay inside the visible water rather than poking into the
-/// taper zone.
-pub(super) const MOUTH_ISLAND_SPREAD_FRAC: f32 = 0.55;
-/// Lateral position jitter (m) on top of the evenly-spaced perpendicular
-/// offset so neighbouring bars don't read as a perfect lattice.
-pub(super) const MOUTH_ISLAND_PERP_JITTER_M: f32 = 1.5;
-pub(super) const MOUTH_ISLAND_RADIUS_MIN_M: f32 = 3.0;
-pub(super) const MOUTH_ISLAND_RADIUS_MAX_M: f32 = 5.0;
-/// Peak signed perpendicular offset (m) of the medial axis at its
-/// midpoint. The bend follows `sin(π·u)` so it's zero at both tips and
-/// peaks at u=0.5, giving a banana-curve silhouette. Sign and magnitude
-/// are randomised per island so adjacent bars don't all kink the same
-/// way; absolute value is bounded by this constant.
-pub(super) const MOUTH_ISLAND_BEND_AMP_M: f32 = 1.5;
-/// Lateral radius multiplier at the upstream tip. Linearly ramps from
-/// this fraction at u=0 to 1.0 at u=u_peak so the downstream half keeps
-/// its full radius. <1 narrows the upstream silhouette without
-/// introducing a kink at the widest axis — matches a real delta bar's
-/// teardrop top-down outline (narrow flow-facing head, broad lee tail).
-pub(super) const MOUTH_ISLAND_TIP_RADIUS_FRAC: f32 = 0.8;
-/// Normalised axis position (0=upstream tip, 1=downstream tip) at which
-/// the island reaches its widest radius. 0.75 gives a teardrop with the
-/// fat end pointing seaward — delta bars erode to a point on the
-/// flow-facing edge and settle sediment on the downstream lee side.
-pub(super) const MOUTH_ISLAND_WIDEST_AXIS_T: f32 = 0.75;
-/// Peak elevation range (m) ABOVE the post-carve sample. Sea cells sit
-/// on bathymetry around −0.5 m, so the peak must budget for lifting the
-/// surface up through the waterline AND leaving a visible dry crown.
-/// The upper end of the range also budgets for the height attenuation
-/// from `smooth_island_area`'s Gaussian pass.
-pub(super) const MOUTH_ISLAND_PEAK_MIN_M: f32 = 0.7;
-pub(super) const MOUTH_ISLAND_PEAK_MAX_M: f32 = 0.9;
-/// Fractional along-fan position of each island's upstream tip and
-/// downstream end, measured from the fan apex (0) toward the polyline
-/// endpoint (1). Tips sitting around the mid-fan place island heads
-/// roughly halfway up the wedge — the visible "finger reach". Ends near
-/// the mouth keep the bars inside the deeply-carved water plane.
-pub(super) const MOUTH_ISLAND_TIP_ALONG_FRAC_MIN: f32 = 0.40;
-pub(super) const MOUTH_ISLAND_TIP_ALONG_FRAC_MAX: f32 = 0.55;
-pub(super) const MOUTH_ISLAND_END_ALONG_FRAC_MIN: f32 = 0.75;
-pub(super) const MOUTH_ISLAND_END_ALONG_FRAC_MAX: f32 = 0.95;
-/// Fraction of the end-vertex lateral offset that the upstream tip
-/// inherits. <1 pulls tips toward the river centerline while ends stay
-/// at the full perpendicular spread — fingers splay outward from the
-/// apex to the mouth, matching real delta distributary geometry instead
-/// of reading as a parallel grid of bars.
-pub(super) const MOUTH_ISLAND_TIP_LATERAL_FRAC: f32 = 0.5;
 /// Base spatial frequency (cycles per meter) of the along-river noise that
 /// widens and narrows the pebble/sand band so it doesn't read as a constant
 /// ribbon parallel to the centerline. ~1/22 gives ~22 m wavelength — short

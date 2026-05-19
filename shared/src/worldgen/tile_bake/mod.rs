@@ -39,7 +39,6 @@ pub use constants::{
     PAL_SNOW, RIVER_MAX_WIDTH_M, RIVER_MIN_WIDTH_M, TILE_DIM, VERTS_PER_SIDE,
 };
 pub use context::BakeContext;
-use context::MouthIsland;
 pub use river_field::bake_river_field;
 
 /// Decomposed height-sample result for one world point. Each field is one
@@ -56,7 +55,6 @@ pub struct PointProbe {
     pub natural_height: f32,
     pub final_height: f32,
     pub river: Option<NearestRiver>,
-    pub mouth_island_bump: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -175,25 +173,12 @@ pub fn bake_tile_with_bridges(
         tile_max_z,
         coast_margin,
     );
-    // Extra margin so the heightmap-smoothing pass's 2-vertex
-    // out-of-tile ring can still see any island whose bump reaches into
-    // that ring — otherwise a tile edge drawn across the end of an
-    // adjacent tile's island would blur against a bump-less ghost and
-    // reintroduce a seam.
-    const ISLAND_BLUR_MARGIN_M: f32 = 2.0;
-    let mouth_islands = mouth_islands_near_tile(
-        &ctx.mouth_islands,
-        tile_min_x - ISLAND_BLUR_MARGIN_M,
-        tile_min_z - ISLAND_BLUR_MARGIN_M,
-        tile_max_x + ISLAND_BLUR_MARGIN_M,
-        tile_max_z + ISLAND_BLUR_MARGIN_M,
-    );
 
     // Order: natural surface → settlement pad → river carve → bridge deck.
     // Carving after the pad lets rivers cut a real channel through the
     // flattened settlement, and bridges run last so the deck rect fills the
     // channel back up at the crossing.
-    let mut heights = sample_tile_heights_no_carve(map, ctx, tx, tz, &mouth_islands);
+    let mut heights = sample_tile_heights_no_carve(map, ctx, tx, tz);
     if !settlement_flattens.is_empty() {
         settlement_flatten::apply_settlement_flatten(
             &mut heights,
@@ -203,14 +188,7 @@ pub fn bake_tile_with_bridges(
             &ctx.detail_noise,
         );
     }
-    apply_river_carve_to_tile(
-        &mut heights,
-        map,
-        tile_min_x,
-        tile_min_z,
-        &river_segs,
-        &mouth_islands,
-    );
+    apply_river_carve_to_tile(&mut heights, map, tile_min_x, tile_min_z, &river_segs);
     if !bridge_flattens.is_empty() {
         bridges::apply_bridge_flatten(&mut heights, tile_min_x, tile_min_z, bridge_flattens);
     }
@@ -240,31 +218,6 @@ pub fn bake_tile_with_bridges(
 #[inline]
 pub(super) fn world_to_tile(wx: f32) -> i32 {
     ((wx + TILE_DIM as f32 * 0.5) / TILE_DIM as f32).floor() as i32
-}
-
-/// AABB-cull `MouthIsland`s against a tile's world-space bounds so the
-/// per-vertex bump loop iterates only the local handful. Vertex-level
-/// bumps inside `sample_elevation_m` still do their own bbox rejection.
-fn mouth_islands_near_tile(
-    islands: &[MouthIsland],
-    tile_min_x: f32,
-    tile_min_z: f32,
-    tile_max_x: f32,
-    tile_max_z: f32,
-) -> Vec<MouthIsland> {
-    islands
-        .iter()
-        .filter(|island| {
-            let r = island.reach_m;
-            let cx = island.center[0];
-            let cz = island.center[1];
-            cx + r >= tile_min_x
-                && cx - r <= tile_max_x
-                && cz + r >= tile_min_z
-                && cz - r <= tile_max_z
-        })
-        .copied()
-        .collect()
 }
 
 #[cfg(test)]
