@@ -317,6 +317,11 @@ let lastBuildKey = ''
       child.traverse((o) => {
         if (!(o instanceof THREE.Mesh)) return
         const m = o.material as THREE.Material
+        // Skip collision-only materials baked into a bridge GLB to fill deck
+        // holes — they're authored alpha=0 and must stay invisible even when
+        // ghost mode ends (otherwise the un-ghost restore turns them into a
+        // visible white plane on the deck).
+        if (m.name?.startsWith('DeckCollisionInvisible')) return
         m.transparent = ghost
         m.opacity = ghost ? GHOST_OPACITY : 1
         m.depthWrite = !ghost

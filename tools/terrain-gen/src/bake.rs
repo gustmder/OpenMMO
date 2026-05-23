@@ -184,7 +184,7 @@ pub fn run(
     // parallel bake can apply them inline with heightmap sampling. -------
     let t = Instant::now();
     let bridge_catalog = load_bridge_catalog().ok_or_else(|| {
-        anyhow::anyhow!("bridge catalog entries 'stone_bridge' and 'big_stone_bridge' missing")
+        anyhow::anyhow!("bridge catalog entries 'stone_bridge' and 'bridge_wood_long' missing")
     })?;
     let bridge_placements = bridges::detect_bridges(
         &map,
@@ -608,7 +608,7 @@ fn load_bridge_catalog() -> Option<bridges::BridgeCatalog> {
     };
     Some(bridges::BridgeCatalog {
         narrow: parse("stone_bridge")?,
-        wide: parse("big_stone_bridge")?,
+        wide: parse("bridge_wood_long")?,
     })
 }
 

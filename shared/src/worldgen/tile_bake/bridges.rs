@@ -6,7 +6,7 @@
 //! same envelope `river_field::compute_pixel` uses to collapse surface→bed,
 //! so it matches the depth-fade contour the player sees. That width is
 //! compared against `BRIDGE_WIDE_RIBBON_M` to pick the wide
-//! (`big_stone_bridge`) vs the narrow (`stone_bridge`) model.
+//! (`bridge_wood_long`) vs the narrow (`stone_bridge`) model.
 //!
 //! Bridge Y sits at the midpoint of the surface the deck ends meet:
 //! heights are sampled perpendicular to the river tangent at
@@ -43,7 +43,7 @@ use super::river_geom::BRIDGE_MAX_VISIBLE_WIDTH_M;
 use super::settlement_flatten::{flatten_height_at, SettlementFlatten};
 
 /// Width threshold (visible water meters — `width + 2 × carve_taper`)
-/// above which the wider `big_stone_bridge` is selected over the narrow
+/// above which the wider `bridge_wood_long` is selected over the narrow
 /// `stone_bridge`. Tuned against the seed-42 world's river distribution
 /// (most crossings sit at visible 19–25 m; only a handful of distributary
 /// branches and headwater stubs fall below ~16 m), so the narrow model
@@ -150,11 +150,22 @@ impl BridgeCatalog {
     /// Catalog model IDs the bake owns. Used by region-object writers to
     /// strip stale bake-emitted bridges from `objects/r±NN_±NN.json` before
     /// writing fresh placements (so user-placed objects in the same region
-    /// survive across bakes).
-    pub fn model_ids(&self) -> [&str; 2] {
-        [self.narrow.id.as_str(), self.wide.id.as_str()]
+    /// survive across bakes). Includes [`LEGACY_BRIDGE_MODEL_IDS`] so that
+    /// re-bakes after a bridge model rename clean up the previous model's
+    /// placements instead of leaving them overlapping the new ones.
+    pub fn model_ids(&self) -> Vec<&str> {
+        let mut ids = vec![self.narrow.id.as_str(), self.wide.id.as_str()];
+        ids.extend(LEGACY_BRIDGE_MODEL_IDS.iter().copied());
+        ids
     }
 }
+
+/// Bridge model IDs that the bake used to place but no longer does. Kept here
+/// so `BridgeCatalog::model_ids()` strips them from region object files on the
+/// next bake — without this, a model swap (e.g. `big_stone_bridge` →
+/// `bridge_wood_long` for the wide slot) leaves the previous model's
+/// placements in `objects/r*_*.json` and they render alongside the new ones.
+pub const LEGACY_BRIDGE_MODEL_IDS: &[&str] = &["big_stone_bridge"];
 
 /// One bridge to drop in the world. Coordinates and rotation match the
 /// `placements[]` entries in `data/terrain/objects/r±NN_±NN.json`.

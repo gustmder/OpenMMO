@@ -80,5 +80,29 @@
         0.15, 0.15
       ]
     }
+  },
+  {
+    "id": "bridge_wood_long",
+    "name": "Long Wooden Bridge",
+    "model": "bridge_wood_long.glb",
+    "kind": "bridge",
+    "gridAlign": true,
+    "minLocalY": -2.2,
+    "flattenBuryDepth": 2.2,
+    "flattenFootLengthZ": 1,
+    "flattenFootWidthX": 4,
+    "bridge": {
+      "deckMinX": -1.77,
+      "deckMaxX": 1.77,
+      "deckMinZ": -10.15,
+      "deckMaxZ": 10.15,
+      "deckCrownY": 0.35,
+      "deckEndY": 0.35,
+      "deckAxis": "z",
+      "railOuterOffset": 0.05,
+      "deckYSamples": [
+        0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.35
+      ]
+    }
   }
 ]
