@@ -17,7 +17,9 @@
 //!                          (HEIGHT_BIAS / HEIGHT_STEP). Holds the river
 //!                          *water surface* at this world XZ within the
 //!                          field's reach, otherwise the natural ground
-//!                          (so depth = surfaceY − bedY collapses to 0).
+//!                          minus `RIVER_OFF_CHANNEL_SAFETY_M` (so depth
+//!                          = surfaceY − bedY stays negative even when
+//!                          runtime heightmap edits lower the bed).
 //!   byte   2      i8       flowX — unit downstream direction × 127
 //!   byte   3      i8       flowZ — unit downstream direction × 127
 //! ```
@@ -28,10 +30,11 @@
 //! which tile owns the segment.
 
 use super::super::global_map::GlobalMap;
+use super::super::noise::smoothstep;
 use super::super::vector_features::{project_point_to_segment, RiverSegment};
 use super::constants::{
     HEIGHT_BIAS, HEIGHT_STEP, RIVER_CARVE_TAPER_EXTRA_M, RIVER_CARVE_TAPER_MIN_M,
-    RIVER_DEPTH_OFFSET_M, VERTS_PER_SIDE,
+    RIVER_DEPTH_OFFSET_M, RIVER_OFF_CHANNEL_SAFETY_M, VERTS_PER_SIDE,
 };
 use super::context::BakeContext;
 use super::heightmap::{lerp, sample_carved_bed};
@@ -163,15 +166,25 @@ fn weighted_flow_and_nearest(
 /// Compute the field record for one pixel: river surface elevation +
 /// downstream-unit flow direction.
 ///
-/// `surface_y = bed_at_proj + OFFSET` for every pixel — the surface
-/// stays horizontal across the entire tile because pixels at any
-/// perpendicular distance project to the same centerline point and
-/// share the same `bed_at_proj`. Visibility is left entirely to the
-/// shader's `depth = surface − bed` fade: where the bed (terrain) rises
-/// above `surface`, alpha goes to 0 and the river terminates naturally
-/// at the bank. This relies on `apply_min_land_floor` keeping land
-/// outside the carve > `RIVER_DEPTH_OFFSET_M` so the river doesn't
-/// bleed across the whole tile.
+/// Surface profile around each segment, by perpendicular distance `dist`:
+/// - `[0, half_width]`: `surface_full = bed_at_proj + RIVER_DEPTH_OFFSET_M`
+///   (visible channel).
+/// - `(half_width, bank_end]`: smoothstep down to `bed_y_pixel` — the
+///   visible bank fade, matching the carve envelope so visible water
+///   width = carved channel width.
+/// - `(bank_end, safety_end]`: smoothstep down to
+///   `bed_y_pixel − RIVER_OFF_CHANNEL_SAFETY_M`. Always clamps to
+///   `depth ≤ 0` in the shader, so it's invisible at bake time. The
+///   margin is a buffer against runtime height-lowering brushes (Map
+///   Editor Road/dig) that would otherwise drop bed below baked surface
+///   and unmask phantom water; the smooth ramp prevents a sharp on/off
+///   seam at the bank if a brush straddles `bank_end`.
+/// - `> safety_end`: `bed_y_pixel − SAFETY` (deep collapse).
+///
+/// Collapsing past the carve envelope is what stops the polyline-
+/// projected `bed_at_proj` from lifting surfaceY across the whole tile
+/// in low-lying regions (cliffs, deltas, estuary flats) and rendering
+/// the river as a flood.
 #[allow(clippy::too_many_arguments)]
 fn compute_pixel(
     wx: f32,
@@ -185,7 +198,7 @@ fn compute_pixel(
     let Some((flow_x, flow_z, idx, t, dist)) =
         weighted_flow_and_nearest(wx, wz, river_segs, seg_tangents)
     else {
-        return (bed_y_pixel, 0.0, 0.0);
+        return (bed_y_pixel - RIVER_OFF_CHANNEL_SAFETY_M, 0.0, 0.0);
     };
     let seg = &river_segs[idx];
 
@@ -196,26 +209,19 @@ fn compute_pixel(
     let proj_x = lerp(seg.ax, seg.bx, t);
     let proj_z = lerp(seg.az, seg.bz, t);
     let bed_at_proj = sample_carved_bed(map, ctx, proj_x, proj_z, river_segs);
-    // Collapse the surface back to local bed beyond the carve's lateral
-    // influence. Without this the polyline-projected `bed_at_proj` lifts
-    // surfaceY above any pixel that happens to be far from the river but
-    // sits in a lower geographic region (cliffs, deltas, estuary flats),
-    // and the shader's `depth = surface − local_bed` then renders the
-    // river as a flood. Use the same `half_width + taper` envelope as
-    // `segment_carve_params` so the visible water matches the carve width.
     let flow_norm = lerp(seg.flow_norm_a, seg.flow_norm_b, t);
     let width = lerp(seg.width_a, seg.width_b, t);
     let half_width = width * 0.5;
     let taper = RIVER_CARVE_TAPER_MIN_M + RIVER_CARVE_TAPER_EXTRA_M * flow_norm;
     let surface_full = bed_at_proj + RIVER_DEPTH_OFFSET_M;
-    let surface_y = if dist <= half_width {
-        surface_full
-    } else if dist >= half_width + taper {
-        bed_y_pixel
-    } else {
-        let u = (dist - half_width) / taper.max(1e-3);
-        let s = 1.0 - u * u * (3.0 - 2.0 * u);
+    let bank_end = half_width + taper;
+    let safety_end = bank_end + taper;
+    let surface_y = if dist <= bank_end {
+        let s = 1.0 - smoothstep(half_width, bank_end, dist);
         bed_y_pixel + (surface_full - bed_y_pixel) * s
+    } else {
+        let s = smoothstep(bank_end, safety_end, dist);
+        bed_y_pixel - RIVER_OFF_CHANNEL_SAFETY_M * s
     };
 
     (surface_y, flow_x, flow_z)
@@ -306,8 +312,10 @@ mod tests {
     fn surface_collapses_to_local_bed_beyond_carve_envelope() {
         // Within the carve's `half_width + taper` envelope the surface sits
         // at `bed_at_proj + RIVER_DEPTH_OFFSET_M`; beyond it the surface
-        // collapses to the local bed so the shader's depth-fade hides the
-        // river instead of letting it spill into surrounding lower terrain.
+        // collapses to `local bed − RIVER_OFF_CHANNEL_SAFETY_M` so the
+        // shader's depth-fade hides the river instead of letting it spill
+        // into surrounding lower terrain — and so runtime height-lowering
+        // brushes have a safety buffer before they could unmask water.
         let (map, ctx) = small_test_ctx();
         let heights = vec![5.0f32; VERTS_PER_SIDE * VERTS_PER_SIDE];
         let segs = vec![RiverSegment {
@@ -330,11 +338,14 @@ mod tests {
             let s = u16::from_le_bytes([bin[off], bin[off + 1]]);
             s as f32 * HEIGHT_STEP - HEIGHT_BIAS
         };
-        // half_width = 2.0, taper = 3.0 + 7.0*0.5 = 6.5, envelope = 8.5.
+        // half_width = 2.0, taper = 3.0 + 7.0*0.5 = 6.5.
+        // bank_end = 8.5, safety_end = 15.
         // j=32 → dist=0 (on axis), j=33 → dist=1 (inside half_width),
-        // j=60 → dist=28 (well past envelope).
+        // j=39 → dist=7 (visible bank), j=43 → dist=11 (safety ramp),
+        // j=60 → dist=28 (deep collapse, well past safety_end).
         let on_axis = pixel_surface(32, 32);
         let inside_half_width = pixel_surface(32, 33);
+        let safety_ramp = pixel_surface(32, 43);
         let far = pixel_surface(32, 60);
         // bed_at_proj is now sampled from the global elevation field at
         // the same projection point for both readings inside the
@@ -344,8 +355,13 @@ mod tests {
             "surface stays flat inside the channel: on_axis={on_axis}, inside={inside_half_width}"
         );
         assert!(
-            (far - 5.0).abs() < 0.1,
-            "beyond carve envelope surface collapses to local bed (5.0m), got {far}"
+            safety_ramp < 5.0 - 0.1 && safety_ramp > 5.0 - RIVER_OFF_CHANNEL_SAFETY_M + 0.1,
+            "safety ramp surface sits between local bed and bed − safety, got {safety_ramp}"
+        );
+        let expected_far = 5.0 - RIVER_OFF_CHANNEL_SAFETY_M;
+        assert!(
+            (far - expected_far).abs() < 0.1,
+            "beyond safety ramp surface sits at local bed − safety ({expected_far}m), got {far}"
         );
 
         // Flow direction propagates to every pixel so ripples are

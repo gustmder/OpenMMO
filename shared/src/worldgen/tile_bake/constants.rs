@@ -91,6 +91,14 @@ pub(super) const RIVER_CARVE_MIN_BED_Y_M: f32 = 0.0;
 /// time. Must agree with the runtime's expected channel depth — set just
 /// large enough to give the depth-fade headroom past the 0.05 m hard cut.
 pub(super) const RIVER_DEPTH_OFFSET_M: f32 = 0.5;
+/// Sentinel margin (m) subtracted from `bed_y_pixel` when the bake collapses
+/// the river surface in the off-channel zone (past `half_width + taper`).
+/// The shader's `depth = max(0, surfaceY − bedHeight)` clamps negatives to
+/// zero, so this margin is invisible at bake time but acts as a buffer
+/// against runtime heightmap edits (Map Editor Road/dig brushes) that would
+/// otherwise lower the bed below the baked surface and unmask phantom water.
+/// Sized well above any realistic single-stroke brush drop.
+pub(super) const RIVER_OFF_CHANNEL_SAFETY_M: f32 = 5.0;
 /// River-bed splat switches from `PAL_RIVER_BED` (ganges pebbles — wet
 /// inland bed look) to `PAL_SAND` (sandy_gravel_02 — matches shallow sea)
 /// near river mouths. The trigger is either a per-segment width above
