@@ -28,6 +28,14 @@ const TILES_PER_REGION: i32 = 16;
 /// Region minimap PNG side length in pixels (1 cell = 1 pixel).
 const REGION_PX: u32 = TILES_PER_REGION as u32 * TILE_DIM as u32;
 
+fn remove_if_exists(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(anyhow::Error::from(e).context(format!("remove {}", path.display()))),
+    }
+}
+
 // Minimap classification thresholds and palette (mirrors
 // `client/src/lib/terrain/regionMinimapGenerator.ts` so on-disk and
 // client-generated PNGs are pixel-identical).
@@ -308,6 +316,13 @@ pub fn run(
             std::fs::write(&spath, &baked.splatmap)
                 .with_context(|| format!("write {}", spath.display()))?;
 
+            // Drop stale pre-edit snapshots from the previous bake;
+            // `ensureOriginalHeightmap` will re-snapshot the fresh terrain
+            // on first edit. Without this, restoring after a house delete
+            // would write the old bake's shape back into the tile.
+            remove_if_exists(&coords::original_heightmap_path(out, tx, tz))?;
+            remove_if_exists(&coords::original_grass_path(out, tx, tz))?;
+
             // Phase 8: tree + grass placement files. The worldgen pipeline
             // doesn't lay houses, so no exclusion rects — empty slice keeps
             // the call compatible with a future replat that does.
@@ -327,15 +342,7 @@ pub fn run(
                 std::fs::write(&rfpath, field_bin)
                     .with_context(|| format!("write {}", rfpath.display()))?;
             } else {
-                match std::fs::remove_file(&rfpath) {
-                    Ok(()) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => {
-                        return Err(
-                            anyhow::Error::from(e).context(format!("remove {}", rfpath.display()))
-                        );
-                    }
-                }
+                remove_if_exists(&rfpath)?;
             }
 
             // Stamp this tile's 64×64 patch into its region minimap. Locking
