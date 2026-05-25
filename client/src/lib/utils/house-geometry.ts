@@ -170,7 +170,8 @@ function collectRoomGeometries(
   }
 
   collectFloorGeometry(room, floorEntries, stairwellFootprints)
-  if (!suppressRoof) collectRoofGeometry(room, frontEntries, backEntries)
+  if (!suppressRoof)
+    collectRoofGeometry(room, frontEntries, backEntries, allRooms)
 
   collectWallSegments(
     room.wallNorth,

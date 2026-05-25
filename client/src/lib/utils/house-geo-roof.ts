@@ -47,13 +47,58 @@ export function shouldSuppressRoof(
 export function collectRoofGeometry(
   room: RoomData,
   frontTarget: GeoEntry[],
-  backTarget?: GeoEntry[]
+  backTarget?: GeoEntry[],
+  allRooms?: RoomData[]
 ) {
   if (room.roofType && room.roofType !== 'flat') {
-    collectGabledRoof(room, frontTarget, backTarget ?? frontTarget)
+    collectGabledRoof(
+      room,
+      frontTarget,
+      backTarget ?? frontTarget,
+      allRooms ?? [room]
+    )
   } else {
     collectFlatRoof(room, frontTarget)
   }
+}
+
+/**
+ * If an adjacent gabled room with a perpendicular ridge meets this room's
+ * gable end, return how far to extend the ridge so it reaches the other
+ * room's ridge centerline. Otherwise 0.
+ */
+function gableExtension(
+  room: RoomData,
+  ridgeAlongX: boolean,
+  end: -1 | 1,
+  allRooms: RoomData[]
+): number {
+  // a = ridge axis (gable sits at a fixed coord on it)
+  // b = perpendicular axis (gable spans a range on it)
+  const aStart = ridgeAlongX ? room.localX : room.localZ
+  const aSize = ridgeAlongX ? room.sizeX : room.sizeZ
+  const bStart = ridgeAlongX ? room.localZ : room.localX
+  const bSize = ridgeAlongX ? room.sizeZ : room.sizeX
+  const myEdge = end === -1 ? aStart : aStart + aSize
+
+  for (const other of allRooms) {
+    if (other === room) continue
+    if (other.floorLevel !== room.floorLevel) continue
+    if (!other.roofType || other.roofType === 'flat') continue
+    if (gabledRoofDims(other).ridgeAlongX === ridgeAlongX) continue
+
+    const oStartA = ridgeAlongX ? other.localX : other.localZ
+    const oSizeA = ridgeAlongX ? other.sizeX : other.sizeZ
+    const oStartB = ridgeAlongX ? other.localZ : other.localX
+    const oSizeB = ridgeAlongX ? other.sizeZ : other.sizeX
+
+    const oEdge = end === -1 ? oStartA + oSizeA : oStartA
+    if (oEdge !== myEdge) continue
+    if (oStartB + oSizeB <= bStart || oStartB >= bStart + bSize) continue
+
+    return Math.abs(oStartA + oSizeA / 2 - myEdge)
+  }
+  return 0
 }
 
 function collectFlatRoof(room: RoomData, target: GeoEntry[]) {
@@ -88,7 +133,8 @@ function collectFlatRoof(room: RoomData, target: GeoEntry[]) {
 function collectGabledRoof(
   room: RoomData,
   frontTarget: GeoEntry[],
-  backTarget: GeoEntry[]
+  backTarget: GeoEntry[],
+  allRooms: RoomData[]
 ) {
   const { localX, localZ, sizeX, sizeZ, wallHeight } = room
   const yBase = floorYBase(room.floorLevel, wallHeight)
@@ -110,7 +156,15 @@ function collectGabledRoof(
   const slopeLen =
     ((halfShort + oh) * Math.sqrt(halfShort ** 2 + ridgeHeight ** 2)) /
     halfShort
-  const ridgeLen = halfLong * 2 + oh * 2
+
+  // If an adjacent room's perpendicular ridge meets a gable, extend our ridge
+  // into the adjacent room to its ridge centerline instead of overhanging.
+  const extLow = gableExtension(room, ridgeAlongX, -1, allRooms)
+  const extHigh = gableExtension(room, ridgeAlongX, 1, allRooms)
+  const endLow = extLow > 0 ? extLow : oh
+  const endHigh = extHigh > 0 ? extHigh : oh
+  const ridgeLen = halfLong * 2 + endLow + endHigh
+  const ridgeShift = (endHigh - endLow) / 2
 
   const ridgeExt = (WALL_THICKNESS * ridgeHeight) / halfShort
   const totalSlopeLen = slopeLen + ridgeExt
@@ -149,8 +203,8 @@ function collectGabledRoof(
 
     const perpCenter = (side * (halfShort + oh)) / 2
     const yCenter = wallTopY + (ridgeHeight - eaveDropY) / 2
-    const tx = cx + (ridgeAlongX ? 0 : perpCenter)
-    const tz = cz + (ridgeAlongX ? perpCenter : 0)
+    const tx = cx + (ridgeAlongX ? ridgeShift : perpCenter)
+    const tz = cz + (ridgeAlongX ? perpCenter : ridgeShift)
     _roofMatrix.makeTranslation(tx, yCenter, tz)
     geo.applyMatrix4(_roofMatrix)
 
@@ -170,6 +224,10 @@ function collectGabledRoof(
   const edgeX = (y: number) => halfShort * (1 - y / ridgeHeight)
 
   for (const endSign of [-1, 1] as const) {
+    // Extended ends merge into the adjacent room's roof — no gable triangle.
+    const endExt = endSign === -1 ? extLow : extHigh
+    if (endExt > 0) continue
+
     let wallSegs: WallConfig[]
     if (ridgeAlongX) {
       wallSegs = endSign === -1 ? room.wallWest : room.wallEast
@@ -253,9 +311,9 @@ function collectGabledRoof(
       const faceZ = cz + (ridgeAlongX ? 0 : endOffset)
       const beamRotY = ridgeAlongX ? Math.PI / 2 : 0
 
-      // Base beam
+      // Base beam — front group so it hides with the roof when player is inside
       const beamWidth = halfShort * 2
-      target.push({
+      frontTarget.push({
         geo: bakedGeo(
           new THREE.BoxGeometry(beamWidth, GABLE_BEAM_HEIGHT, FRAME_DEPTH),
           faceX,
