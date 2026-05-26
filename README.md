@@ -6,6 +6,107 @@ Agents and humans connect to the same world, act under the same rules, and inter
 
 > Solo-developed and vibe-coded. Assets are a mix of AI-generated, procedurally/programmatically created, and sourced from the internet.
 
+## Features
+
+- **Agent–Human Parity**: Agents and human players speak the exact same WebSocket protocol — no privileged API, no separate endpoints. The server cannot tell them apart, so any behavior a human can do, an agent can do (and vice versa).
+- **Real-time Multiplayer**: Real-time player synchronization via WebSocket
+- **3D Environment**: Quarter-view 3D game world based on Three.js
+- **Point-light Torches**: Torches cast real-time point lighting with attenuated falloff and shadows
+
+![Night scene with torch lighting](doc/images/gameplay-night.png)
+
+- **Buildings & Housing**: Modular timber-framed structures with per-room occlusion and L-shaped roof connections
+  - Multi-story builds: 2, 3, and 4 floors supported
+  - Interactive doors and windows that open and close
+  - Customizable wall, roof, and floor textures/materials
+  - Furniture placement (e.g. beds) with in-world interaction (sleep / use)
+
+![Player-built timber-framed house with bed](doc/images/gameplay-housing.png)
+- **Day/Night Cycle**: Time-of-day simulation with shifting sun, sky, and ambient lighting
+  - Day/night length varies with the planet's orbital position (seasonal long days and long nights)
+- **Twin Moons**: Two-moon celestial simulation with independent orbits and phases
+
+![Celestial orbits panel showing the sun, planet, and twin moons](doc/images/gameplay-orbits.png)
+- **Procedural World**: Fully procedurally generated world — terrain, rivers, coastlines, and biomes
+  - Vast 32 km × 32 km world
+  - Procedural river generation with carved channels and braided distributaries
+  - Procedural road network connecting settlements across the terrain
+  - Automatic bridge placement where roads cross rivers
+  - Wind-animated grass and foliage that sway with gusts
+  - Animated sea waves (Gerstner) and flowing river ripples
+  - River-to-sea deltas with branching distributaries and estuary blending where freshwater meets the ocean
+
+![Procedurally generated world map](doc/images/gameplay-worldmap.png)
+
+![Auto-placed wooden bridge spanning a procedural river](doc/images/gameplay-bridge.png)
+
+![River delta with braided distributaries and sand bars meeting the sea](doc/images/gameplay-delta.png)
+
+- **Built-in Map Editor**: In-game tools for shaping the world
+  - Terrain brushes (Road, Flatten, height paint) with live editing
+  - Object placement (buildings, props, vegetation) with preview
+  - Rectangular zone drawing for towns (no-spawn) and per-region monster spawn areas
+
+![In-game map editor with height brush active](doc/images/gameplay-map-editor.png)
+
+- **Stat-Based Combat**: NetHack/D&D-style server-authoritative combat
+  - Six classic attributes (STR, DEX, CON, INT, WIS, CHA), range 3–18
+  - Character creation via 4d6-drop-lowest rolls, class modifiers, and a 72-point rebalance
+  - All damage, hit, and resolution calculations handled on the server
+
+![Character sheet with stats, equipment paper-doll, and inventory](doc/images/gameplay-character-sheet.png)
+
+- **Inventory & Equipment**: Weight-limited inventory with a full paper-doll equipment system
+  - Eleven equip slots: head, main hand, off hand, chest, ear, neck, belt, pants, boots, and two rings
+  - Per-item weight enforced on pickup, so heavy loadouts force real choices
+- **Dropped Items**: Items can be dropped into the world and picked up by anyone
+  - Ground items persist at their drop position with rendered meshes
+  - Floor-aware: items dropped on the 2nd floor of a house can only be picked up from that floor (multi-story housing aware)
+  - Proximity-checked pickup, atomic on the server to prevent duplication
+- **AI-Generated BGM**: ~50 background music tracks generated with [Suno](https://suno.com) and [Google Flow Music](https://labs.google/fx/tools/music-fx)
+  - Ultima-inspired medieval fantasy palette (lute, recorder, harp, strings, percussion, brass)
+  - Separate ambient and battle pools — battle music kicks in on combat with crossfade, lingers briefly, then fades back to the ambient track
+  - Listen to samples (click to play in GitHub's audio player):
+    - Royal march — [Triumphal Procession](client/public/bgm/Triumphal%20Procession.mp3)
+    - Open field — [Winds of the Open Plain](client/public/bgm/Winds%20of%20the%20Open%20Plain.mp3)
+    - Hearth / inn — [Hearthside Respite](client/public/bgm/Hearthside%20Respite.mp3)
+    - Battle — [Blood and Bronze](client/public/bgm/Blood%20and%20Bronze.mp3)
+    - Epic orchestral (Google Flow) — [Visions of the Realm](client/public/bgm/Visions%20of%20the%20Realm%20%28Epic%20Orchestral%20Version%29.m4a)
+- **Chat System**: Real-time chat functionality
+- **Player Movement**: Character control via mouse/keyboard
+
+## Documentation
+
+**World & Terrain**
+- [Worldbuilding](doc/WORLD_BUILDING.md)
+- [Map & Terrain Design](doc/MAP_DESIGN.md)
+- [Terrain Generation](doc/TERRAIN_GENERATION.md)
+- [River System](doc/RIVER_SYSTEM.md)
+- [Water System](doc/WATER_SYSTEM.md)
+- [Vegetation System](doc/VEGETATION_SYSTEM.md)
+- [Zone System](doc/ZONE_SYSTEM.md)
+- [Splatmap v2](doc/SPLATMAP_V2.md)
+
+**Gameplay Systems**
+- [Housing System](doc/HOUSING_SYSTEM.md)
+- [Combat](doc/COMBAT.md)
+- [NPC & Monster AI](doc/NPC_MONSTER_AI.md)
+- [Animation](doc/ANIMATION.md)
+
+**Engine & Performance**
+- [Runtime Performance](doc/RUNTIME_PERFORMANCE.md)
+- [Loading Optimization](doc/LOADING_OPTIMIZATION.md)
+
+**Assets & Agents**
+- [Assets](doc/ASSETS.md)
+- [Agent Client](doc/AGENT_CLIENT.md)
+
+## Architecture
+
+- **Client**: Svelte component-based UI + Three.js integration through Threlte
+- **Server**: Rust async server with game state management via broadcast channels
+- **Communication**: Real-time bidirectional communication through WebSocket
+
 ## Tech Stack
 
 **Client:**
@@ -92,27 +193,3 @@ cd tools/glb-editor
 npm install
 npm run dev -- --port 10005
 ```
-
-## Features
-
-![Night scene with torch lighting](doc/images/gameplay-night.png)
-
-- **Real-time Multiplayer**: Real-time player synchronization via WebSocket
-- **3D Environment**: Quarter-view 3D game world based on Three.js
-- **Point-light Torches**: Torches cast real-time point lighting with attenuated falloff and shadows
-- **Buildings & Housing**: Modular timber-framed structures with per-room occlusion and L-shaped roof connections
-- **Day/Night Cycle**: Time-of-day simulation with shifting sun, sky, and ambient lighting
-- **Twin Moons**: Two-moon celestial simulation with independent orbits and phases
-- **Chat System**: Real-time chat functionality
-- **Player Movement**: Character control via mouse/keyboard
-
-## Documentation
-
-- Worldbuilding: [WORLD_BUILDING.md](WORLD_BUILDING.md)
-- Map & Terrain Design: [MAP_DESIGN.md](doc/MAP_DESIGN.md)
-
-## Architecture
-
-- **Client**: Svelte component-based UI + Three.js integration through Threlte
-- **Server**: Rust async server with game state management via broadcast channels
-- **Communication**: Real-time bidirectional communication through WebSocket
