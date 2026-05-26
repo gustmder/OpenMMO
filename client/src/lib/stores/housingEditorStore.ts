@@ -5,6 +5,10 @@ import type {
   RoomType,
   WallVariant,
 } from '../types/housing'
+import { HOUSING_TEXTURES } from '../utils/housing-textures'
+
+const textureIdxByGlb = (glb: string) =>
+  HOUSING_TEXTURES.findIndex((t) => t.glb === glb)
 
 export interface RoomTemplate {
   label: string
@@ -91,14 +95,16 @@ export const placementPreview = writable<{ x: number; z: number } | null>(null)
 export const placementFloorLevel = writable<number>(0)
 export const placementRoomType = writable<RoomType>('normal')
 
-// Wall texture index (0-3)
-export const wallTextureIndex = writable<number>(0)
-// Floor texture index (0-3)
-export const floorTextureIndex = writable<number>(0)
-// Roof texture index (0-3)
-export const roofTextureIndex = writable<number>(0)
-// Roof type
-export const placementRoofType = writable<RoofType>('flat')
+export const wallTextureIndex = writable<number>(
+  textureIdxByGlb('housing/beige_wall_001_1k')
+)
+export const floorTextureIndex = writable<number>(
+  textureIdxByGlb('housing/dark_wooden_planks_1k')
+)
+export const roofTextureIndex = writable<number>(
+  textureIdxByGlb('housing/clay_roof_tiles_02_1k')
+)
+export const placementRoofType = writable<RoofType>('steep')
 
 // Per-wall variant selection (initialized from template, user can override)
 export const wallVariants = writable<WallVariants>({
