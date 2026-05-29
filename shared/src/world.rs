@@ -12,6 +12,22 @@ pub struct Position {
     pub z: f32,
 }
 
+impl Position {
+    /// Squared distance in the X-Z (ground) plane, ignoring height. Squared
+    /// to avoid a `sqrt` when callers only compare against a radius.
+    pub fn dist_xz_sq(&self, other: &Position) -> f32 {
+        let dx = self.x - other.x;
+        let dz = self.z - other.z;
+        dx * dx + dz * dz
+    }
+}
+
+/// Distance (game units) within which agent (NPC) clients perceive nearby
+/// humans and monsters. The server uses it to decide which gameplay events to
+/// deliver to an agent connection; the agent-client uses the same value to
+/// decide which entities to surface to the LLM. Shared so the two stay equal.
+pub const NPC_SIGHT_RADIUS: f32 = 27.0;
+
 /// Axis-aligned rectangular zone where monsters must not spawn (e.g. towns).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

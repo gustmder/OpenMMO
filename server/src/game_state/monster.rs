@@ -172,9 +172,28 @@ impl super::GameState {
 
         let max_total = crate::world_config::world_config().max_monsters_total as usize;
 
+        // Players eligible for ambient spawns this tick. NPC players only
+        // qualify when a human is within sight range (no point spawning monsters
+        // around an agent nobody is watching); humans always qualify. Computed
+        // once under a single read lock so the per-rule loop below needs none.
         let player_ids: Vec<String> = {
             let players = self.players.read().await;
-            players.keys().cloned().collect()
+            let radius_sq = super::AGENT_EVENT_DELIVERY_RADIUS * super::AGENT_EVENT_DELIVERY_RADIUS;
+            let human_positions: Vec<_> = players
+                .values()
+                .filter(|p| !p.is_npc)
+                .map(|p| p.position)
+                .collect();
+            players
+                .iter()
+                .filter(|(_, player)| {
+                    !player.is_npc
+                        || human_positions
+                            .iter()
+                            .any(|hp| player.position.dist_xz_sq(hp) <= radius_sq)
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
         };
         if player_ids.is_empty() {
             return;

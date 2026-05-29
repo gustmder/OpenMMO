@@ -375,6 +375,21 @@ impl super::GameState {
         Some(build_save_data(player, *char_id, *xp))
     }
 
+    pub async fn has_human_player_within(&self, player_id: &PlayerId, radius: f32) -> bool {
+        let players = self.players.read().await;
+        let Some(player) = players.get(player_id) else {
+            return false;
+        };
+
+        let radius_sq = radius * radius;
+        players.iter().any(|(other_id, other)| {
+            if other_id == player_id || other.is_npc {
+                return false;
+            }
+            other.position.dist_xz_sq(&player.position) <= radius_sq
+        })
+    }
+
     #[allow(dead_code)]
     pub async fn get_player_count(&self) -> usize {
         self.players.read().await.len()

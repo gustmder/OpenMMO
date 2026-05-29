@@ -24,7 +24,7 @@ pub use messages::{
     deserialize_client_msg, deserialize_server_msg, serialize_client_msg, serialize_server_msg,
     ClientMessage, PlayerId, ServerMessage,
 };
-pub use world::{GameDateTime, NoSpawnZone, Position};
+pub use world::{GameDateTime, NoSpawnZone, Position, NPC_SIGHT_RADIUS};
 
 #[cfg(test)]
 mod tests {

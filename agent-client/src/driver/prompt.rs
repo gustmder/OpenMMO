@@ -6,19 +6,14 @@
 use onlinerpg_shared::ServerMessage;
 
 use crate::orchestrator::ScheduleEntry;
-use crate::state::SharedState;
-
-/// Max XZ distance from the agent at which an external event is still
-/// forwarded to the LLM. Events farther than this are dropped to keep the
-/// prompt focused on what the NPC can plausibly perceive.
-const EVENT_DISTANCE_LIMIT: f32 = 20.0;
+use crate::state::{SharedState, NPC_SIGHT_RADIUS};
 
 fn within_event_range(state: &SharedState, x: f32, z: f32) -> bool {
     let Some(self_p) = state.self_player.as_ref() else {
         return true;
     };
     crate::geom::PlanarDelta::xz(self_p.position.x, self_p.position.z, x, z).dist
-        <= EVENT_DISTANCE_LIMIT
+        <= NPC_SIGHT_RADIUS
 }
 
 fn player_within_event_range(state: &SharedState, player_id: &str) -> bool {

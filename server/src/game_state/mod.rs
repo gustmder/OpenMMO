@@ -24,6 +24,10 @@ struct DoorKey {
 
 #[derive(Debug, Clone)]
 pub struct BroadcastMessage {
+    /// Structural form, only inspected by NPC connections to proximity-gate
+    /// delivery. Wrapped in `Arc` so the per-receiver clone done by the
+    /// broadcast channel is a refcount bump, not a deep copy of the payload.
+    pub msg: Arc<ServerMessage>,
     pub bytes: Bytes,
     /// If set, skip sending to this player (used for MonsterMoved owner filtering).
     pub skip_player_id: Option<PlayerId>,
@@ -41,6 +45,10 @@ mod time;
 
 #[cfg(test)]
 mod tests;
+
+/// Agent clients only need gameplay events when a human is close enough to
+/// plausibly matter. Same physical radius the agent-client perceives with.
+pub(crate) const AGENT_EVENT_DELIVERY_RADIUS: f32 = onlinerpg_shared::NPC_SIGHT_RADIUS;
 
 #[derive(Default)]
 struct IdState {
@@ -130,6 +138,7 @@ impl GameState {
         match serialize_server_msg(&msg) {
             Ok(bytes) => {
                 let _ = self.broadcast_tx.send(BroadcastMessage {
+                    msg: Arc::new(msg),
                     bytes: Bytes::from(bytes),
                     skip_player_id,
                 });

@@ -13,8 +13,10 @@ use tokio::sync::{mpsc, Notify};
 const MAX_EVENTS: usize = 200;
 /// Distance threshold for "player appeared nearby" agent events (in game units).
 const NEARBY_PLAYER_RADIUS: f32 = 10.0;
-/// Don't notify LLM about monster movement beyond 30 game units.
-const MONSTER_MOVE_NOTIFY_RADIUS_SQ: f32 = 30.0 * 30.0;
+/// NPC sight distance for deciding which nearby human and monster activity
+/// matters. Re-exported from the shared crate so the server's event-delivery
+/// radius and the agent's perception radius are guaranteed equal.
+pub(crate) use onlinerpg_shared::NPC_SIGHT_RADIUS;
 
 /// How urgently an event needs LLM attention.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,10 +165,18 @@ impl SharedState {
 
     /// Returns true if any non-NPC (human) player is in `nearby_players`.
     pub fn has_nearby_human_players(&self) -> bool {
+        let Some(self_player) = self.self_player.as_ref() else {
+            return false;
+        };
         let self_id = self.self_player_id.as_deref();
-        self.nearby_players
-            .iter()
-            .any(|(id, p)| self_id != Some(id.as_str()) && !p.is_npc)
+        let radius_sq = NPC_SIGHT_RADIUS * NPC_SIGHT_RADIUS;
+
+        self.nearby_players.iter().any(|(id, p)| {
+            if self_id == Some(id.as_str()) || p.is_npc {
+                return false;
+            }
+            p.position.dist_xz_sq(&self_player.position) <= radius_sq
+        })
     }
 
     /// Check all nearby players and emit an agent event for any player
@@ -521,11 +531,9 @@ impl SharedState {
                 position,
                 ..
             } => {
-                // Only forward to LLM if monster is within notification radius
+                // Only forward to LLM if monster is within sight radius
                 let dominated_by_distance = self.self_player.as_ref().is_some_and(|sp| {
-                    let dx = position.x - sp.position.x;
-                    let dz = position.z - sp.position.z;
-                    dx * dx + dz * dz > MONSTER_MOVE_NOTIFY_RADIUS_SQ
+                    position.dist_xz_sq(&sp.position) > NPC_SIGHT_RADIUS * NPC_SIGHT_RADIUS
                 });
                 if !dominated_by_distance {
                     self.latest_monster_moves.insert(monster_id.clone(), msg);
@@ -715,10 +723,17 @@ impl SharedState {
             ));
         }
 
-        // Nearby players (exclude self)
+        // Nearby players (exclude self and humans beyond the sight radius)
+        let sp = self.self_player.as_ref();
+        let sight_sq = NPC_SIGHT_RADIUS * NPC_SIGHT_RADIUS;
         for p in self.nearby_players.values() {
             if self.self_player_id.as_deref() == Some(p.id.as_str()) {
                 continue;
+            }
+            if let Some(sp) = sp {
+                if p.position.dist_xz_sq(&sp.position) > sight_sq {
+                    continue;
+                }
             }
             lines.push(format!(
                 "Player: {} Lv.{} HP {}/{} at ({:.1}, {:.1}, {:.1})",
@@ -726,13 +741,10 @@ impl SharedState {
             ));
         }
 
-        // Exclude monsters beyond LLM notification radius
-        let sp = self.self_player.as_ref();
+        // Exclude monsters beyond LLM sight radius
         for m in self.nearby_monsters.values() {
             if let Some(sp) = sp {
-                let dx = m.position.x - sp.position.x;
-                let dz = m.position.z - sp.position.z;
-                if dx * dx + dz * dz > MONSTER_MOVE_NOTIFY_RADIUS_SQ {
+                if m.position.dist_xz_sq(&sp.position) > sight_sq {
                     continue;
                 }
             }

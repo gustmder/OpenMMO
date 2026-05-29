@@ -27,6 +27,7 @@ struct ConnectionState {
     pending_character_attributes: Option<CharacterAttributes>,
     last_heartbeat: std::time::Instant,
     is_npc: bool,
+    agent_had_nearby_humans: bool,
 }
 
 impl ConnectionState {
@@ -38,6 +39,7 @@ impl ConnectionState {
             pending_character_attributes: None,
             last_heartbeat: std::time::Instant::now(),
             is_npc: false,
+            agent_had_nearby_humans: false,
         }
     }
 
@@ -161,6 +163,16 @@ pub async fn handle_connection(
                             }
                         }
 
+                        if !should_send_broadcast_to_connection(
+                            &game_state,
+                            &mut state,
+                            &msg.msg,
+                        )
+                        .await
+                        {
+                            continue;
+                        }
+
                         if let Err(e) = ws_sender.send(Message::Binary(msg.bytes.clone())).await {
                             error!("Failed to send message to client: {}", e);
                             break;
@@ -239,6 +251,83 @@ pub async fn handle_connection(
     }
 
     info!("Connection handler finished");
+}
+
+/// Whether a broadcast is a proximity-gated world event for agent (NPC)
+/// connections. Exhaustive (no wildcard arm) on purpose: when a new
+/// `ServerMessage` variant is added the compiler forces it to be classified
+/// here, so a new gameplay event can't silently bypass proximity gating.
+fn is_agent_gameplay_event(msg: &ServerMessage) -> bool {
+    match msg {
+        ServerMessage::PlayerJoined { .. }
+        | ServerMessage::PlayerLeft { .. }
+        | ServerMessage::PlayerMoved { .. }
+        | ServerMessage::PlayerTeleported { .. }
+        | ServerMessage::ChatMessage { .. }
+        | ServerMessage::GameState { .. }
+        | ServerMessage::MonsterSpawned { .. }
+        | ServerMessage::MonsterMoved { .. }
+        | ServerMessage::MonsterRemoved { .. }
+        | ServerMessage::MonsterDead { .. }
+        | ServerMessage::PlayerAttacked { .. }
+        | ServerMessage::MonsterAttackedPlayer { .. }
+        | ServerMessage::PlayerDead { .. }
+        | ServerMessage::PlayerRespawned { .. }
+        | ServerMessage::PlayerHealthUpdate { .. }
+        | ServerMessage::XpGained { .. }
+        | ServerMessage::PlayerTorchToggled { .. }
+        | ServerMessage::PlayerInteractionChanged { .. }
+        | ServerMessage::HouseSpawned { .. }
+        | ServerMessage::HouseUpdated { .. }
+        | ServerMessage::HouseRemoved { .. }
+        | ServerMessage::HousesInArea { .. }
+        | ServerMessage::DoorToggled { .. }
+        | ServerMessage::GroundItemSpawned { .. }
+        | ServerMessage::GroundItemRemoved { .. } => true,
+
+        // Session/auth/character/inventory control messages: always delivered
+        // to the connection regardless of nearby humans.
+        ServerMessage::AuthSuccess { .. }
+        | ServerMessage::JoinSuccess { .. }
+        | ServerMessage::AuthError { .. }
+        | ServerMessage::CharacterCreated { .. }
+        | ServerMessage::CharacterStatsRolled { .. }
+        | ServerMessage::CharacterDeleted { .. }
+        | ServerMessage::CharacterError { .. }
+        | ServerMessage::GameTimeSync { .. }
+        | ServerMessage::MonsterAssigned { .. }
+        | ServerMessage::SpawnMonsterRequest { .. }
+        | ServerMessage::Kicked { .. }
+        | ServerMessage::InteractionRejected { .. }
+        | ServerMessage::NoSpawnZones { .. }
+        | ServerMessage::InventoryState { .. }
+        | ServerMessage::InventoryUpdated { .. }
+        | ServerMessage::InventoryError { .. } => false,
+    }
+}
+
+async fn should_send_broadcast_to_connection(
+    game_state: &Arc<GameState>,
+    state: &mut ConnectionState,
+    msg: &ServerMessage,
+) -> bool {
+    if !state.is_npc || !is_agent_gameplay_event(msg) {
+        return true;
+    }
+
+    let Some(player_id) = state.player_id.as_ref() else {
+        return true;
+    };
+
+    let has_nearby_human = game_state
+        .has_human_player_within(player_id, crate::game_state::AGENT_EVENT_DELIVERY_RADIUS)
+        .await;
+
+    // Deliver while a human is near, plus one final event on the near->far
+    // transition so the agent's world view doesn't freeze on a stale snapshot.
+    let send = has_nearby_human || state.agent_had_nearby_humans;
+    state.agent_had_nearby_humans = has_nearby_human;
+    send
 }
 
 async fn handle_client_message(
