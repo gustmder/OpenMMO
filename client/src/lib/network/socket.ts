@@ -387,6 +387,7 @@ class NetworkManager {
   }
 
   sendEquipItem(instanceId: number) {
+    if (!this.isNetworkableInstanceId(instanceId, 'equip')) return
     this.sendMessage({ EquipItem: { instance_id: instanceId } })
   }
 
@@ -394,21 +395,33 @@ class NetworkManager {
     this.sendMessage({ UnequipItem: { slot } })
   }
 
-  sendDropItem(instanceId: number) {
-    // Negative ids are client-only debug items (see chat-commands.ts) and must
-    // never reach the server.
+  sendDebugDropItem(itemDefId: string) {
+    this.sendMessage({ DebugDropItem: { item_def_id: itemDefId } })
+  }
+
+  // Item instance ids are assigned by the server, so invalid ids must never
+  // be sent back over inventory-related messages.
+  private isNetworkableInstanceId(
+    instanceId: number,
+    operation: string
+  ): boolean {
     if (!Number.isSafeInteger(instanceId) || instanceId < 0) {
-      console.warn('Ignoring invalid drop item instance id:', instanceId)
-      return
+      console.warn(
+        `Ignoring invalid ${operation} item instance id:`,
+        instanceId
+      )
+      return false
     }
+    return true
+  }
+
+  sendDropItem(instanceId: number) {
+    if (!this.isNetworkableInstanceId(instanceId, 'drop')) return
     this.sendMessage({ DropItem: { instance_id: instanceId } })
   }
 
   sendPickupItem(instanceId: number) {
-    if (!Number.isSafeInteger(instanceId) || instanceId < 0) {
-      console.warn('Ignoring invalid pickup item instance id:', instanceId)
-      return
-    }
+    if (!this.isNetworkableInstanceId(instanceId, 'pickup')) return
     this.sendMessage({ PickupItem: { instance_id: instanceId } })
   }
 

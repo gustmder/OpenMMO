@@ -1,6 +1,7 @@
 use crate::auth::AuthService;
 use crate::types::{PlayerId, ServerMessage};
 use onlinerpg_shared::inventory::{EquipSlot, GroundItem, ItemInstance, PlayerInventory};
+use rand::Rng;
 use tracing::{info, warn};
 
 use super::ServerGroundItem;
@@ -266,6 +267,28 @@ impl super::GameState {
         self.send_inventory_snapshot(player_id, snapshot).await;
     }
 
+    /// Insert a ground item into the world and announce it to nearby players.
+    pub(super) async fn spawn_ground_item(&self, ground_item: GroundItem) {
+        let position = ground_item.position;
+        {
+            let mut ground_items = self.ground_items.write().await;
+            ground_items.insert(
+                ground_item.instance_id,
+                ServerGroundItem {
+                    item: ground_item.clone(),
+                    dropped_at_ms: Self::now_ms(),
+                },
+            );
+        }
+        self.send_direct_message_to_players_within_position(
+            &position,
+            super::AGENT_EVENT_DELIVERY_RADIUS,
+            ServerMessage::GroundItemSpawned { item: ground_item },
+            None,
+        )
+        .await;
+    }
+
     pub async fn drop_item(&self, player_id: &PlayerId, instance_id: u64) {
         let (position, floor_level) = {
             let players = self.players.read().await;
@@ -308,26 +331,45 @@ impl super::GameState {
             floor_level,
         };
 
-        {
-            let mut ground_items = self.ground_items.write().await;
-            ground_items.insert(
-                instance_id,
-                ServerGroundItem {
-                    item: ground_item.clone(),
-                    dropped_at_ms: Self::now_ms(),
-                },
-            );
-        }
-
         self.mark_inventory_dirty(player_id).await;
         self.send_inventory_snapshot(player_id, snapshot).await;
-        let item_position = ground_item.position;
-        self.send_direct_message_to_players_within_position(
-            &item_position,
-            super::AGENT_EVENT_DELIVERY_RADIUS,
-            ServerMessage::GroundItemSpawned { item: ground_item },
-            None,
-        )
+        self.spawn_ground_item(ground_item).await;
+    }
+
+    pub async fn debug_drop_item(&self, player_id: &PlayerId, item_def_id: &str) {
+        if self.item_defs.get(item_def_id).is_none() {
+            self.send_inventory_error(player_id, "Unknown item").await;
+            return;
+        }
+
+        let (player_position, rotation, floor_level) = {
+            let players = self.players.read().await;
+            match players.get(player_id) {
+                Some(p) => (p.position, p.rotation, p.floor_level),
+                None => return,
+            }
+        };
+
+        let (landing_angle, landing_distance) = {
+            let mut rng = rand::thread_rng();
+            (
+                rng.gen::<f32>() * std::f32::consts::TAU,
+                rng.gen::<f32>().sqrt() * 0.7,
+            )
+        };
+        let position = crate::types::Position {
+            x: player_position.x + rotation.sin() + landing_angle.cos() * landing_distance,
+            y: player_position.y,
+            z: player_position.z + rotation.cos() + landing_angle.sin() * landing_distance,
+        };
+
+        let instance_id = self.next_instance_id().await;
+        self.spawn_ground_item(GroundItem {
+            instance_id,
+            item_def_id: item_def_id.to_string(),
+            position,
+            floor_level,
+        })
         .await;
     }
 

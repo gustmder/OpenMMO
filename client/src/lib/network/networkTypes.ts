@@ -128,6 +128,7 @@ export type ClientMessage =
   | { MonsterAttack: { monster_id: string; target_player_id: string } }
   | 'RequestRespawn'
   | { DebugTeleport: { position: Position } }
+  | { DebugDropItem: { item_def_id: string } }
   | { TorchToggle: { enabled: boolean } }
   | {
       ToggleDoor: {

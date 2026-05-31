@@ -71,6 +71,9 @@ pub enum ClientMessage {
     DebugTeleport {
         position: Position,
     },
+    DebugDropItem {
+        item_def_id: String,
+    },
     TorchToggle {
         enabled: bool,
     },

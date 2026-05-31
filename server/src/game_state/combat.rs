@@ -1,9 +1,50 @@
 use crate::game::{character_hp, combat};
-use crate::types::{MonsterState, PlayerId, ServerMessage};
+use crate::types::{MonsterState, PlayerId, Position, ServerMessage};
 use onlinerpg_shared::inventory::{EquipSlot, GroundItem};
 use onlinerpg_shared::xp;
 use rand::Rng;
+use std::f32::consts::TAU;
 use tracing::{info, warn};
+
+const WEAPON_DROP_OFFSET_METERS: f32 = 2.0;
+
+fn dropped_weapon_position(monster_position: Position) -> Position {
+    let angle = rand::thread_rng().gen_range(0.0..TAU);
+    offset_position_at_angle(monster_position, angle, WEAPON_DROP_OFFSET_METERS)
+}
+
+fn offset_position_at_angle(origin: Position, angle: f32, distance: f32) -> Position {
+    Position {
+        x: origin.x + angle.cos() * distance,
+        y: origin.y,
+        z: origin.z + angle.sin() * distance,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pos(x: f32, y: f32, z: f32) -> Position {
+        Position { x, y, z }
+    }
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.0001,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn weapon_drop_offsets_two_meters_at_angle() {
+        let drop_pos = offset_position_at_angle(pos(10.0, 3.0, 20.0), 0.0, 2.0);
+
+        assert_close(drop_pos.x, 12.0);
+        assert_close(drop_pos.y, 3.0);
+        assert_close(drop_pos.z, 20.0);
+    }
+}
 
 impl super::GameState {
     pub async fn broadcast_player_attack(&self, player_id: &PlayerId, monster_id: String) {
@@ -126,28 +167,12 @@ impl super::GameState {
 
                     if let Some(item_def_id) = dropped_weapon_item_def_id {
                         let instance_id = self.next_instance_id().await;
-                        let ground_item = GroundItem {
+                        self.spawn_ground_item(GroundItem {
                             instance_id,
                             item_def_id,
-                            position: monster_position,
+                            position: dropped_weapon_position(monster_position),
                             floor_level: -1,
-                        };
-                        {
-                            let mut ground_items = self.ground_items.write().await;
-                            ground_items.insert(
-                                instance_id,
-                                super::ServerGroundItem {
-                                    item: ground_item.clone(),
-                                    dropped_at_ms: Self::now_ms(),
-                                },
-                            );
-                        }
-                        self.send_direct_message_to_players_within_position(
-                            &monster_position,
-                            super::AGENT_EVENT_DELIVERY_RADIUS,
-                            ServerMessage::GroundItemSpawned { item: ground_item },
-                            None,
-                        )
+                        })
                         .await;
                     }
 

@@ -618,6 +618,14 @@ async fn handle_client_message(
             }
         }
 
+        ClientMessage::DebugDropItem { item_def_id } => {
+            if let Some(id) = &state.player_id {
+                game_state.debug_drop_item(id, &item_def_id).await;
+            } else {
+                warn!("Received debug drop from client that is not in game");
+            }
+        }
+
         ClientMessage::TorchToggle { enabled } => {
             if let Some(id) = &state.player_id {
                 game_state.toggle_player_torch(id, enabled).await;

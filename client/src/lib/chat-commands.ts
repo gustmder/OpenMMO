@@ -2,7 +2,7 @@ import { MathUtils } from 'three'
 import { get } from 'svelte/store'
 import { gameStore, addChatMessage } from './stores/gameStore'
 import { worldToTileCell } from './components/game-scene/terrain-utils'
-import { groundItemManager } from './managers/groundItemManager'
+import { networkManager } from './network/socket'
 import {
   editorHeightManager,
   editorSplatManager,
@@ -12,11 +12,6 @@ import { riverWireframeVisible } from './stores/debugStore'
 import { computeGrassPlacement, regenerateVegMeta } from './utils/grass-data'
 
 type CommandHandler = (args: string) => void
-
-// Debug `/drop` items use negative instance ids. Negative == client-only:
-// these spawns never hit the server (sendDropItem/sendPickupItem in socket.ts
-// reject id < 0, and onPickupGrab removes them locally instead of networking).
-let nextDebugDropInstanceId = -1
 
 const commands: Record<string, CommandHandler> = {
   '/pos': () => {
@@ -34,7 +29,7 @@ const commands: Record<string, CommandHandler> = {
     }
   },
 
-  '/drop': () => {
+  '/drop': (args) => {
     const player = get(gameStore).currentPlayer
     if (!player) {
       addChatMessage({
@@ -44,30 +39,11 @@ const commands: Record<string, CommandHandler> = {
       return
     }
 
-    const forwardX = Math.sin(player.rotation)
-    const forwardZ = Math.cos(player.rotation)
-    const landingAngle = Math.random() * Math.PI * 2
-    const landingDistance = Math.sqrt(Math.random()) * 0.7
-    const landingOffsetX = Math.cos(landingAngle) * landingDistance
-    const landingOffsetZ = Math.sin(landingAngle) * landingDistance
-    const instanceId = nextDebugDropInstanceId--
-
-    groundItemManager.spawn(
-      {
-        instance_id: instanceId,
-        item_def_id: 'goblin_sword',
-        position: {
-          x: player.position.x + forwardX + landingOffsetX,
-          y: player.position.y,
-          z: player.position.z + forwardZ + landingOffsetZ,
-        },
-        floor_level: 0,
-      },
-      { animateSpawn: true }
-    )
+    const itemDefId = args.trim() || 'goblin_sword'
+    networkManager.sendDebugDropItem(itemDefId)
 
     addChatMessage({
-      text: 'Drop: spawned animated Goblin Sword near 1m ahead',
+      text: `Drop: requested ${itemDefId} near 1m ahead`,
       sender: 'system',
     })
   },
