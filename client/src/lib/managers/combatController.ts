@@ -6,6 +6,9 @@ export interface MonsterInfo {
   isDeadPending?: boolean
 }
 
+// Distance at which combat breaks off (target stepped out of attack range).
+const ATTACK_BREAK_RANGE = 2.5
+
 export type CombatUpdateResult =
   | { action: 'none' }
   | { action: 'idle' }
@@ -106,7 +109,7 @@ export class CombatController {
     }
 
     // COMBAT phase (in range)
-    if (dist > 2.5 && !isFinishingAttack) {
+    if (dist > ATTACK_BREAK_RANGE && !isFinishingAttack) {
       this.cancelCombat()
       return { action: 'idle' }
     }
@@ -119,7 +122,10 @@ export class CombatController {
       monsterInfo.state !== 'dead' && !monsterInfo.isDeadPending
 
     if (this._attackTimer >= cooldownMs) {
-      if (dist > 2.5) {
+      // A new attack cycle is about to fire: unlike the break check above this
+      // applies even mid-finish, so a target that fled during the swing ends
+      // combat instead of starting another cycle out of range.
+      if (dist > ATTACK_BREAK_RANGE) {
         this.cancelCombat()
         return { action: 'idle' }
       }

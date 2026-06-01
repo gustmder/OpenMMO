@@ -316,7 +316,9 @@ class MonsterManager {
           monster.position.x,
           monster.position.z
         )
-        if (Math.abs(monster.position.y - terrainY) > 0.001) {
+        if (
+          Math.abs(monster.position.y - terrainY) > MONSTER_POSITION_EPSILON
+        ) {
           this.applyMonsterPose(monster, {
             position: { ...monster.position, y: terrainY },
           })
@@ -390,10 +392,10 @@ class MonsterManager {
         // ai_tick_brain returns a TickResult object with commands, position, rotation, state
         const result = raw as TickResult
 
-        // Apply the brain snapshot through the same movement gate used by
-        // network and interpolation updates. Chasing AI reports its internal
-        // state as attack, then emits a Run Move command below; this prevents
-        // the intermediate attack snapshot from translating the model.
+        // Gate XZ movement here: the brain reports its internal state as attack
+        // while chasing, then emits a Run Move command below; gating prevents
+        // the intermediate attack snapshot from translating the model before
+        // the Run command arrives.
         const resultPosition = result.position
           ? {
               x: result.position.x,
@@ -401,11 +403,15 @@ class MonsterManager {
               z: result.position.z,
             }
           : undefined
-        this.applyMonsterPose(monster, {
-          position: resultPosition,
-          rotation: result.rotation,
-          state: result.state,
-        })
+        this.applyMonsterPose(
+          monster,
+          {
+            position: resultPosition,
+            rotation: result.rotation,
+            state: result.state,
+          },
+          true
+        )
 
         // Process transition commands (network sync, attacks)
         if (result.commands) {
@@ -419,7 +425,7 @@ class MonsterManager {
         if (
           monster.state !== 'dead' &&
           !monster.isDeadPending &&
-          (monster.state === 'walk' || monster.state === 'run') &&
+          this.isMovementState(monster.state) &&
           monster.targetPosition
         ) {
           this.moveTowards(monster, monster.targetPosition, deltaTime)
@@ -495,11 +501,15 @@ class MonsterManager {
       rotation?: number
       state?: MonsterState
       targetPosition?: Position
-    }
+    },
+    // The owner's brain reports its internal state as `attack` while chasing
+    // and emits the locomotion (Run) Move command separately. Gating XZ
+    // movement to walk/run states stops that intermediate attack snapshot from
+    // sliding the model before the Run command arrives. Authoritative network
+    // updates and visual-only state changes must NOT gate — they carry
+    // ground-truth positions that have to be applied regardless of state.
+    gateXzMovement = false
   ) {
-    const nextState = update.state ?? monster.state
-    const canMoveXz = this.isMovementState(nextState)
-
     if (update.state) {
       monster.state = update.state
       this.updateMoveSpeedFromState(monster)
@@ -510,22 +520,24 @@ class MonsterManager {
     }
 
     if (update.targetPosition !== undefined) {
-      monster.targetPosition = canMoveXz ? update.targetPosition : undefined
-    } else if (!canMoveXz) {
-      monster.targetPosition = undefined
+      monster.targetPosition = update.targetPosition
     }
 
     if (!update.position) return
 
-    if (!this.hasXzMovement(monster.position, update.position) || canMoveXz) {
-      monster.position = update.position
+    if (
+      gateXzMovement &&
+      !this.isMovementState(monster.state) &&
+      this.hasXzMovement(monster.position, update.position)
+    ) {
+      // Non-movement states may still need terrain/deck height correction, but
+      // XZ translation must go through walk/run so the rendered pose has a
+      // locomotion animation to match it.
+      monster.position = { ...monster.position, y: update.position.y }
       return
     }
 
-    // Non-movement states may still need terrain/deck height correction, but
-    // XZ translation must go through walk/run so the rendered pose has a
-    // locomotion animation to match it.
-    monster.position = { ...monster.position, y: update.position.y }
+    monster.position = update.position
   }
 
   private processAiCommands(monster: MonsterData, commands: AiCommand[]) {
@@ -578,8 +590,9 @@ class MonsterManager {
 
       const snappedPosition = this.snapPositionToTerrain(position)
       const snappedTargetPosition = this.snapPositionToTerrain(targetPosition)
-      // When the hit is delayed, omit `state` so the current state is kept;
-      // applyMonsterPose then gates targetPosition on that state itself.
+      // Authoritative update: apply position/target directly (no movement gate).
+      // When the hit is delayed, omit `state` so the current state is kept until
+      // the pending impact resolves.
       this.applyMonsterPose(monster, {
         position: snappedPosition,
         rotation,
