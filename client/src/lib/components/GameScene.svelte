@@ -98,7 +98,7 @@
   import { initScene } from './game-scene/scene-init'
   import { createMultiPassRenderer } from './game-scene/multi-pass-rendering'
   import { OFFSCREEN_Y } from '../utils/house-geo-utils'
-  import { graphicsQuality, getPreset } from '../stores/graphicsSettings'
+  import { graphicsQuality, getEffectivePreset, shouldUseIphoneRenderBudget, shouldUseMobileRenderBudget } from '../stores/graphicsSettings'
 
   interface Props {
     serverUrl: string
@@ -176,6 +176,7 @@
   let playerAttackDuration = $state(1.533) // Default from slash1 animation (data/animation_durations.json)
 
   const multiPassRenderer = createMultiPassRenderer()
+  const iphoneRenderBudget = shouldUseIphoneRenderBudget()
 
   // Track whether all initial data is loaded (terrain + splat + grass assets).
   // The loading dialog stays until frames render smoothly (pipeline compilation
@@ -271,7 +272,7 @@
   })
 
   $effect(() => {
-    applyGraphicsPreset(renderer, getPreset($graphicsQuality), directionalLight)
+    applyGraphicsPreset(renderer, getEffectivePreset($graphicsQuality), directionalLight)
   })
 
   const calendarSystem = createCalendarSystem({
@@ -387,8 +388,10 @@
         playerControl.updatePlayerMovement(deltaTime)
       }
       tileManager.updateFromPlayerPosition(currentPlayer?.position ?? null)
-      tileManager.drainQueue()
-      drainTileWork()
+      if (!iphoneRenderBudget || terrainTiles.length < 2) {
+        tileManager.drainQueue()
+      }
+      drainTileWork(iphoneRenderBudget ? 1 : undefined)
       syncTileMeshes()
       // Finalize teleport once full 3x3 heightmap grid is loaded
       if ($teleportLoading && currentPlayer &&
@@ -713,7 +716,9 @@
       }
     })
 
-    const sceneRes = initScene(renderer, scene, viewportSize.width, viewportSize.height)
+    const sceneRes = initScene(renderer, scene, viewportSize.width, viewportSize.height, {
+      skipWaterEffects: iphoneRenderBudget,
+    })
     terrainGeometry = sceneRes.terrainGeometry
     waterNormalMap = sceneRes.waterNormalMap
     sceneRes.waterFoamMapPromise.then((tex) => { waterFoamMap = tex })
@@ -723,17 +728,24 @@
     reflectionManager = sceneRes.reflectionManager
     reflectionTexture = sceneRes.reflectionTexture
 
-    // Load all terrain tiles immediately (no staggering during initial load)
+    const mobileRenderBudget = shouldUseMobileRenderBudget()
+
+    // Desktop loads all terrain tiles immediately. Mobile staggers the initial
+    // tile mount to avoid WebGPU memory spikes while the world is preparing.
     tileManager.rebuild(terrainCenterChunk.x, terrainCenterChunk.z)
-    tileManager.drainAll()
+    if (mobileRenderBudget) {
+      tileManager.drainQueue()
+    } else {
+      tileManager.drainAll()
+    }
 
     bootstrapSceneAssets({
       renderer,
       terrainTiles,
       heightManager: terrainHeightManager,
       playerPosition: currentPlayer?.position ?? null,
-      grassLayerRef,
-      housingLayerRef,
+      grassLayerRef: iphoneRenderBudget ? undefined : grassLayerRef,
+      housingLayerRef: iphoneRenderBudget ? undefined : housingLayerRef,
     }).then(() => {
       // Mark data as ready. Threlte's render loop compiles WebGPU pipelines
       // on-demand (synchronously per frame) under the loading dialog overlay.
@@ -822,7 +834,7 @@
   bind:ref={directionalLight}
   position={[10, 10, 10]}
   intensity={SUN_MAX_INTENSITY}
-  castShadow
+  castShadow={!iphoneRenderBudget}
   shadow.bias={-0.0002}
   shadow.normalBias={0.15}
   shadow.mapSize.width={2048}
@@ -839,18 +851,20 @@
      existing material (~12s stall). Intensity 0 = invisible but pipelines
      are compiled with shadow support. After compilation, move offscreen so
      the shadow frustum captures nothing (avoids 6× cube-face renders/frame). -->
-<T.PointLight
-  bind:ref={placeholderShadowLight}
-  position={isSceneCompiling ? [0, 0, 0] : [0, OFFSCREEN_Y, 0]}
-  intensity={0}
-  distance={50}
-  decay={1.2}
-  castShadow
-  shadow.mapSize.width={512}
-  shadow.mapSize.height={512}
-  shadow.camera.near={0.5}
-  shadow.camera.far={50}
-/>
+{#if !iphoneRenderBudget}
+  <T.PointLight
+    bind:ref={placeholderShadowLight}
+    position={isSceneCompiling ? [0, 0, 0] : [0, OFFSCREEN_Y, 0]}
+    intensity={0}
+    distance={50}
+    decay={1.2}
+    castShadow
+    shadow.mapSize.width={512}
+    shadow.mapSize.height={512}
+    shadow.camera.near={0.5}
+    shadow.camera.far={50}
+  />
+{/if}
 
 <GameSceneTerrainLayer
   {terrainGeometry}
@@ -864,64 +878,66 @@
   {camera}
 />
 
-<GameSceneHousingLayer
-  bind:this={housingLayerRef}
-  playerPosition={currentPlayer?.position ?? null}
-/>
+{#if !iphoneRenderBudget}
+  <GameSceneHousingLayer
+    bind:this={housingLayerRef}
+    playerPosition={currentPlayer?.position ?? null}
+  />
 
-<GameSceneGrassLayer
-  bind:this={grassLayerRef}
-  {terrainTiles}
-  grassDataManager={terrainGrassDataManager}
-  playerPosition={currentPlayer?.position ?? null}
-/>
+  <GameSceneGrassLayer
+    bind:this={grassLayerRef}
+    {terrainTiles}
+    grassDataManager={terrainGrassDataManager}
+    playerPosition={currentPlayer?.position ?? null}
+  />
 
-<GameSceneTreeLayer
-  bind:this={treeLayerRef}
-  {terrainTiles}
-  treeDataManager={terrainTreeDataManager}
-  playerPosition={currentPlayer?.position ?? null}
-/>
+  <GameSceneTreeLayer
+    bind:this={treeLayerRef}
+    {terrainTiles}
+    treeDataManager={terrainTreeDataManager}
+    playerPosition={currentPlayer?.position ?? null}
+  />
 
-<GameSceneWindParticles
-  bind:this={windParticlesRef}
-  playerPosition={currentPlayer?.position ?? null}
-/>
+  <GameSceneWindParticles
+    bind:this={windParticlesRef}
+    playerPosition={currentPlayer?.position ?? null}
+  />
 
-<GameSceneWaterLayer
-  bind:this={waterLayerRef}
-  {terrainGeometry}
-  {terrainTiles}
-  heightManager={terrainHeightManager}
-  splatManager={terrainSplatManager}
-  normalMap={waterNormalMap}
-  foamMap={waterFoamMap}
-  causticsMap={waterCausticsMap}
-  time={waterTime}
-  sunDirection={waterSunDir}
-  sunColor={waterSunColor}
-  cameraDirection={waterCamDir}
-  moonBrightness={waterMoonBrightness}
-  refractionMap={refractionTexture}
-  reflectionMap={reflectionTexture}
-  bind:waterGroup={waterGroup}
-/>
+  <GameSceneWaterLayer
+    bind:this={waterLayerRef}
+    {terrainGeometry}
+    {terrainTiles}
+    heightManager={terrainHeightManager}
+    splatManager={terrainSplatManager}
+    normalMap={waterNormalMap}
+    foamMap={waterFoamMap}
+    causticsMap={waterCausticsMap}
+    time={waterTime}
+    sunDirection={waterSunDir}
+    sunColor={waterSunColor}
+    cameraDirection={waterCamDir}
+    moonBrightness={waterMoonBrightness}
+    refractionMap={refractionTexture}
+    reflectionMap={reflectionTexture}
+    bind:waterGroup={waterGroup}
+  />
 
-<GameSceneRiverLayer
-  bind:this={riverLayerRef}
-  {terrainTiles}
-  heightManager={terrainHeightManager}
-  {riverFieldManager}
-  normalMap={waterNormalMap}
-  reflectionMap={reflectionTexture}
-  refractionMap={refractionTexture}
-  time={waterTime}
-  sunDirection={waterSunDir}
-  sunColor={waterSunColor}
-  cameraDirection={waterCamDir}
-  moonBrightness={waterMoonBrightness}
-  torchLight={waterTorchLight}
-/>
+  <GameSceneRiverLayer
+    bind:this={riverLayerRef}
+    {terrainTiles}
+    heightManager={terrainHeightManager}
+    {riverFieldManager}
+    normalMap={waterNormalMap}
+    reflectionMap={reflectionTexture}
+    refractionMap={refractionTexture}
+    time={waterTime}
+    sunDirection={waterSunDir}
+    sunColor={waterSunColor}
+    cameraDirection={waterCamDir}
+    moonBrightness={waterMoonBrightness}
+    torchLight={waterTorchLight}
+  />
+{/if}
 
 <T is={entityClipGroupObj} bind:ref={entityClipGroup}>
   <GameScenePlayersLayer
@@ -940,6 +956,7 @@
     groundItemMeshes={groundItemsLayerRef?.getGroup() ? [groundItemsLayerRef.getGroup()!] : []}
     {monsterModels}
     {playerAttackDuration}
+    torchEffectsDisabled={iphoneRenderBudget}
     heightManager={terrainHeightManager}
     onStateChange={handlePlayerStateChange}
     onAttackDuration={(duration) => (playerAttackDuration = duration)}

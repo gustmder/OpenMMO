@@ -24,6 +24,9 @@
   let isStarting = $state(false)
   let isDeleting = $state(false)
   let errorMessage = $state('')
+  let selectedCharacter = $derived(
+    characters.find((character) => character.id === selectedCharacterId)
+  )
 
   function isBusy() {
     return isStarting || isDeleting
@@ -63,6 +66,10 @@
       errorMessage = result.message ?? 'Failed to delete character'
     }
   }
+
+  function formatCharacterClass(value: string) {
+    return value.charAt(0).toUpperCase() + value.slice(1)
+  }
 </script>
 
 <!-- UI overlay only — the 3D scene is rendered in the shared Canvas in App.svelte -->
@@ -71,6 +78,33 @@
     <h1 class="title">Character Select</h1>
     <p class="account-name">Account: {accountName}</p>
   </div>
+
+  {#if selectedCharacter}
+    <div class="mobile-character-info">
+      <div class="info-main">
+        <span class="info-name">{selectedCharacter.name}</span>
+        <span class="info-meta">
+          Lv. {selectedCharacter.level} {formatCharacterClass(selectedCharacter.class)} · HP {selectedCharacter.max_hp}
+        </span>
+      </div>
+
+      <div class="info-stats">
+        {#each [
+          ['STR', selectedCharacter.attributes.str],
+          ['DEX', selectedCharacter.attributes.dex],
+          ['CON', selectedCharacter.attributes.con],
+          ['INT', selectedCharacter.attributes.int],
+          ['WIS', selectedCharacter.attributes.wis],
+          ['CHA', selectedCharacter.attributes.cha],
+        ] as stat (stat[0])}
+          <div class="info-stat">
+            <span>{stat[0]}</span>
+            <strong>{stat[1]}</strong>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <div class="bottom-row">
     <button
@@ -107,6 +141,12 @@
   .character-select-overlay {
     position: fixed;
     inset: 0;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
     z-index: 1;
     display: flex;
     flex-direction: column;
@@ -118,7 +158,7 @@
 
   .top-bar {
     text-align: center;
-    padding: 32px 16px 0;
+    padding: max(24px, calc(env(safe-area-inset-top) + 12px)) 16px 0;
   }
 
   .title {
@@ -134,9 +174,13 @@
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   }
 
+  .mobile-character-info {
+    display: none;
+  }
+
   .bottom-row {
     position: fixed;
-    bottom: 16px;
+    bottom: max(16px, calc(env(safe-area-inset-bottom) + 10px));
     left: 16px;
     right: 60px;
     display: flex;
@@ -146,9 +190,12 @@
   }
 
   .bottom-row button {
+    box-sizing: border-box;
+    height: 36px;
     border-radius: 7px;
-    padding: 8px 16px;
+    padding: 0 16px;
     font-size: 14px;
+    line-height: 1.2;
     cursor: pointer;
   }
 
@@ -191,5 +238,99 @@
     max-width: 400px;
     text-align: center;
     white-space: nowrap;
+  }
+
+  @media (max-width: 600px), (max-height: 700px) {
+    .top-bar {
+      padding-top: max(14px, calc(env(safe-area-inset-top) + 8px));
+    }
+
+    .title {
+      font-size: 22px;
+    }
+
+    .account-name {
+      margin-top: 3px;
+      font-size: 12px;
+    }
+
+    .bottom-row {
+      bottom: max(16px, calc(env(safe-area-inset-bottom) + 10px));
+      left: 10px;
+      right: 60px;
+      gap: 8px;
+    }
+
+    .bottom-row button {
+      height: 36px;
+      padding: 0 12px;
+      font-size: 13px;
+    }
+
+    .mobile-character-info {
+      position: fixed;
+      left: 60px;
+      right: 60px;
+      bottom: max(64px, calc(env(safe-area-inset-bottom) + 58px));
+      box-sizing: border-box;
+      display: grid;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid rgba(124, 201, 255, 0.7);
+      border-radius: 8px;
+      background: rgba(16, 25, 38, 0.88);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      pointer-events: auto;
+      backdrop-filter: blur(4px);
+    }
+
+    .info-main {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+      text-align: center;
+    }
+
+    .info-name {
+      overflow: hidden;
+      color: #f7fafc;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .info-meta {
+      color: #f0c040;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .info-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+    }
+
+    .info-stat {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      padding: 4px 6px;
+      border: 1px solid rgba(83, 101, 123, 0.75);
+      border-radius: 6px;
+      background: rgba(34, 53, 82, 0.72);
+      color: #a7b7ca;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .info-stat strong {
+      color: #e4ecf5;
+      font-size: 12px;
+    }
   }
 </style>

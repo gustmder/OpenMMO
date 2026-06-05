@@ -1,5 +1,4 @@
 <script module lang="ts">
-  import { SvelteMap } from 'svelte/reactivity'
   import mapLabelsJson from '../../../../data/map_labels.json'
 
   const REGION_SIZE = 16
@@ -9,6 +8,9 @@
   const MIN_ZOOM = 1
   const MAX_ZOOM = 32
   const DEFAULT_ZOOM = 8
+  const IPHONE_DEFAULT_ZOOM = 2
+  const IPHONE_MAX_ZOOM = 4
+  const IPHONE_IMAGE_CACHE_LIMIT = 32
 
   // --- Shared place-name labels (generated from data-src/map_labels.csv) ---
   type LabelKind = 'continent' | 'capital' | 'city' | 'town' | 'sea' | 'island'
@@ -42,8 +44,19 @@
   const SIN_R = Math.sin(ROTATE_ANGLE)
 
   // --- Image cache (module-level, persists across component lifecycle) ---
-  const imageCache = new SvelteMap<string, HTMLImageElement | null>()
-  const pendingLoads = new SvelteMap<string, Promise<HTMLImageElement | null>>()
+  // Intentionally non-reactive: image loads should not re-run the render effect.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const imageCache = new Map<string, HTMLImageElement | null>()
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const pendingLoads = new Map<string, Promise<HTMLImageElement | null>>()
+
+  function trimImageCache(limit: number) {
+    if (!Number.isFinite(limit) || imageCache.size <= limit) return
+    for (const key of imageCache.keys()) {
+      imageCache.delete(key)
+      if (imageCache.size <= limit) break
+    }
+  }
 
   // --- Persisted view state (survives dialog close/reopen) ---
   let savedCamX: number | null = null
@@ -57,6 +70,12 @@
   import { minimapVersion } from '../stores/editorStore'
   import { regionMinimapServerUrl } from '../terrain/regionMinimapGenerator'
   import { networkManager } from '../network/socket'
+  import { shouldUseIphoneRenderBudget } from '../stores/graphicsSettings'
+
+  const iphoneMapBudget = shouldUseIphoneRenderBudget()
+  const defaultZoomSpan = iphoneMapBudget ? IPHONE_DEFAULT_ZOOM : DEFAULT_ZOOM
+  const maxZoomSpan = iphoneMapBudget ? IPHONE_MAX_ZOOM : MAX_ZOOM
+  const imageCacheLimit = iphoneMapBudget ? IPHONE_IMAGE_CACHE_LIMIT : Infinity
 
   function loadRegionImage(rx: number, rz: number): Promise<HTMLImageElement | null> {
     const key = `${rx},${rz}`
@@ -67,6 +86,7 @@
       const img = new Image()
       img.onload = () => {
         imageCache.set(key, img)
+        trimImageCache(imageCacheLimit)
         pendingLoads.delete(key)
         resolve(img)
       }
@@ -95,7 +115,7 @@
   let camZ = $state(0)
 
   // --- Zoom state (in regions/km) ---
-  let zoomSpan = $state(DEFAULT_ZOOM)
+  let zoomSpan = $state(defaultZoomSpan)
 
   // Restore saved view state or center on player when dialog opens
   $effect(() => {
@@ -108,7 +128,9 @@
         camZ = playerZ
       }
       if (savedZoom !== null) {
-        zoomSpan = savedZoom
+        zoomSpan = Math.min(savedZoom, maxZoomSpan)
+      } else {
+        zoomSpan = defaultZoomSpan
       }
     }
   })
@@ -280,11 +302,11 @@
   }
 
   function zoomOut() {
-    zoomSpan = Math.min(MAX_ZOOM, zoomSpan + 1)
+    zoomSpan = Math.min(maxZoomSpan, zoomSpan + 1)
   }
 
   function zoomReset() {
-    zoomSpan = DEFAULT_ZOOM
+    zoomSpan = defaultZoomSpan
     savedZoom = null
   }
 
@@ -362,6 +384,11 @@
 
   // --- Actions ---
   function close() {
+    if (iphoneMapBudget) {
+      renderGeneration++
+      imageCache.clear()
+      pendingLoads.clear()
+    }
     worldMapVisible.set(false)
   }
 
@@ -432,7 +459,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="backdrop" onclick={handleBackdropClick}>
-  <div class="dialog" role="dialog" aria-modal="true">
+  <div class="dialog" class:iphone-map-budget={iphoneMapBudget} role="dialog" aria-modal="true">
     <div class="header">
       <h2>World Map</h2>
       <div class="controls">
@@ -497,6 +524,16 @@
     background: rgba(16, 16, 16, 0.95);
     color: #f4f4f4;
     overflow: hidden;
+  }
+
+  .dialog.iphone-map-budget {
+    width: calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    height: min(
+      calc(100dvh - 96px - env(safe-area-inset-top) - env(safe-area-inset-bottom)),
+      calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right))
+    );
+    max-width: 440px;
+    max-height: 440px;
   }
 
   .header {

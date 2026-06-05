@@ -20,6 +20,7 @@
   import { loadSplatLayers, buildSplatAtlas } from '../../utils/splatLayerLoader'
   import type { SplatAtlasSet } from '../../utils/splatLayerLoader'
   import { mapEditorMode, gridVisible } from '../../stores/debugStore'
+  import { shouldUseIphoneRenderBudget } from '../../stores/graphicsSettings'
   import {
     brushWorldPos,
     brushSize,
@@ -78,9 +79,10 @@
   // Track whether editor overlay is compiled into materials.
   // Starts false for faster initial pipeline compilation; upgraded on first editor use.
   let editorOverlayCompiled = false
+  const iphoneRenderBudget = shouldUseIphoneRenderBudget()
 
   // ── Material + Geometry pools (created on demand, reused across tile lifecycles) ──
-  const materialPool: MeshStandardNodeMaterial[] = []
+  const materialPool: THREE.Material[] = []
   const geometryPool: THREE.BufferGeometry[] = []
   // Template arrays for fast geometry reset (flat plane positions/normals)
   let templatePositions: Float32Array | null = null
@@ -106,12 +108,14 @@
 
   async function preseedAndPrecompilePool() {
     if (poolPrecompiled) return
-    if (!renderer || !camera || !terrainGeometry || !defaultAtlas || !_defaultLayers) return
+    if (!renderer || !camera || !terrainGeometry) return
+    if (!iphoneRenderBudget && (!defaultAtlas || !_defaultLayers)) return
     poolPrecompiled = true
 
     // Preseed pool with N ready-to-use material+geometry pairs.
     const twins: THREE.Mesh[] = []
-    for (let i = 0; i < PRECOMPILE_POOL_SIZE; i++) {
+    const poolSize = iphoneRenderBudget ? 1 : PRECOMPILE_POOL_SIZE
+    for (let i = 0; i < poolSize; i++) {
       const mat = createDefaultMaterial()
       const geo = terrainGeometry.clone()
       materialPool.push(mat)
@@ -157,7 +161,7 @@
   })
 
   /** Create a new terrain material using the default atlas. */
-  function createDefaultMaterial(): MeshStandardNodeMaterial {
+  function createDefaultMaterial(): THREE.Material {
     const mat = makeSplatStandardMaterial({
       atlas: defaultAtlas!,
       tileScales: _defaultLayers!.map((l) => l.tile),
@@ -208,7 +212,7 @@
   }
 
   /** Take a material from the pool, or create one on demand. */
-  function acquireMaterial(): MeshStandardNodeMaterial | null {
+  function acquireMaterial(): THREE.Material | null {
     const mat = materialPool.pop()
     if (mat) {
       resetMaterialToDefaults(mat)
@@ -222,7 +226,7 @@
   }
 
   /** Return a material to the pool for reuse. */
-  function releaseMaterial(mat: MeshStandardNodeMaterial) {
+  function releaseMaterial(mat: THREE.Material) {
     materialPool.push(mat)
   }
 
@@ -246,8 +250,9 @@
   }
 
   /** Reset a pooled material's uniforms back to defaults. */
-  function resetMaterialToDefaults(mat: MeshStandardNodeMaterial) {
-    const u = mat.userData?.uniforms
+  function resetMaterialToDefaults(mat: THREE.Material) {
+    const splatMat = mat as MeshStandardNodeMaterial
+    const u = splatMat.userData?.uniforms
     if (!u || !defaultAtlas || !_defaultLayers) return
     u.splatMap.value = defaultSplat
     u.diffuseAtlas.value = defaultAtlas.diffuseAtlas
@@ -332,7 +337,7 @@
   const geoMap = new SvelteMap<string, THREE.BufferGeometry>()
 
   // ── Per-tile materials (SvelteMap for template reactivity) ──
-  const materialMap = new SvelteMap<string, MeshStandardNodeMaterial>()
+  const materialMap = new SvelteMap<string, THREE.Material>()
 
   function getTileCoords(tile: TerrainTile): {
     tileX: number

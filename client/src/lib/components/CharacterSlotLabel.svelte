@@ -12,9 +12,10 @@
     camera: THREE.Camera | undefined
     onclick: () => void
     ondblclick: () => void
+    compact?: boolean
   }
 
-  let { character, selected, positionX, positionZ, camera, onclick, ondblclick }: Props =
+  let { character, selected, positionX, positionZ, camera, onclick, ondblclick, compact = false }: Props =
     $props()
 
   const PANEL_Y = -0.9
@@ -25,12 +26,28 @@
   // Panel dimensions depend on content
   const CHAR_PANEL_WIDTH = 1.4
   const CHAR_PANEL_HEIGHT = 0.95
+  const COMPACT_PANEL_WIDTH = 1.36
+  const COMPACT_PANEL_HEIGHT = 0.46
   const EMPTY_PANEL_WIDTH = 0.9
   const EMPTY_PANEL_HEIGHT = 0.4
 
-  const panelWidth = $derived(character ? CHAR_PANEL_WIDTH : EMPTY_PANEL_WIDTH)
+  const panelWidth = $derived(
+    character
+      ? compact
+        ? COMPACT_PANEL_WIDTH
+        : CHAR_PANEL_WIDTH
+      : compact
+        ? COMPACT_PANEL_WIDTH
+        : EMPTY_PANEL_WIDTH
+  )
   const panelHeight = $derived(
-    character ? CHAR_PANEL_HEIGHT : EMPTY_PANEL_HEIGHT
+    character
+      ? compact
+        ? COMPACT_PANEL_HEIGHT
+        : CHAR_PANEL_HEIGHT
+      : compact
+        ? COMPACT_PANEL_HEIGHT
+        : EMPTY_PANEL_HEIGHT
   )
 
   const borderColor = $derived(selected ? '#7cc9ff' : '#53657b')
@@ -116,66 +133,63 @@
   </T.Mesh>
 
   {#if character}
-    <!-- Character name -->
     <TextLabel
       text={character.name}
-      position={[0, panelHeight / 2 - 0.12, 0.02]}
-      fontSize={0.13}
+      position={[0, compact ? 0 : panelHeight / 2 - 0.12, 0.02]}
+      fontSize={compact ? 0.19 : 0.13}
       color="#f7fafc"
       anchorX="center"
       anchorY="middle"
       depthOffset={-1}
     />
 
-    <!-- Level -->
-    <TextLabel
-      text={`Lv. ${character.level}  HP ${character.max_hp}`}
-      position={[0, panelHeight / 2 - 0.27, 0.02]}
-      fontSize={0.1}
-      color="#f0c040"
-      anchorX="center"
-      anchorY="middle"
-      depthOffset={-1}
-    />
+    {#if !compact}
+      <TextLabel
+        text={`Lv. ${character.level}  HP ${character.max_hp}`}
+        position={[0, panelHeight / 2 - 0.27, 0.02]}
+        fontSize={0.1}
+        color="#f0c040"
+        anchorX="center"
+        anchorY="middle"
+        depthOffset={-1}
+      />
 
-    <!-- Stats: 2 columns x 3 rows -->
-    {#each [
-      { label: 'STR', value: character.attributes.str, col: 0, row: 0 },
-      { label: 'DEX', value: character.attributes.dex, col: 1, row: 0 },
-      { label: 'CON', value: character.attributes.con, col: 0, row: 1 },
-      { label: 'INT', value: character.attributes.int, col: 1, row: 1 },
-      { label: 'WIS', value: character.attributes.wis, col: 0, row: 2 },
-      { label: 'CHA', value: character.attributes.cha, col: 1, row: 2 },
-    ] as stat (stat.label)}
-      {@const colX = stat.col === 0 ? -STAT_COL_GAP : 0.02}
-      {@const rowY = STATS_START_Y + (2 - stat.row) * STAT_ROW_GAP}
-      <!-- Stat label -->
-      <TextLabel
-        text={stat.label}
-        position={[colX, rowY, 0.02]}
-        fontSize={STAT_FONT_SIZE}
-        color="#a7b7ca"
-        anchorX="left"
-        anchorY="middle"
-        depthOffset={-1}
-      />
-      <!-- Stat value -->
-      <TextLabel
-        text={String(stat.value)}
-        position={[colX + STAT_VALUE_OFFSET, rowY, 0.02]}
-        fontSize={STAT_FONT_SIZE}
-        color="#a7b7ca"
-        anchorX="left"
-        anchorY="middle"
-        depthOffset={-1}
-      />
-    {/each}
+      {#each [
+        { label: 'STR', value: character.attributes.str, col: 0, row: 0 },
+        { label: 'DEX', value: character.attributes.dex, col: 1, row: 0 },
+        { label: 'CON', value: character.attributes.con, col: 0, row: 1 },
+        { label: 'INT', value: character.attributes.int, col: 1, row: 1 },
+        { label: 'WIS', value: character.attributes.wis, col: 0, row: 2 },
+        { label: 'CHA', value: character.attributes.cha, col: 1, row: 2 },
+      ] as stat (stat.label)}
+        {@const colX = stat.col === 0 ? -STAT_COL_GAP : 0.02}
+        {@const rowY = STATS_START_Y + (2 - stat.row) * STAT_ROW_GAP}
+        <TextLabel
+          text={stat.label}
+          position={[colX, rowY, 0.02]}
+          fontSize={STAT_FONT_SIZE}
+          color="#a7b7ca"
+          anchorX="left"
+          anchorY="middle"
+          depthOffset={-1}
+        />
+        <TextLabel
+          text={String(stat.value)}
+          position={[colX + STAT_VALUE_OFFSET, rowY, 0.02]}
+          fontSize={STAT_FONT_SIZE}
+          color="#a7b7ca"
+          anchorX="left"
+          anchorY="middle"
+          depthOffset={-1}
+        />
+      {/each}
+    {/if}
   {:else}
     <!-- Empty slot -->
     <TextLabel
       text="+ Create"
       position={[0, 0, 0.02]}
-      fontSize={0.12}
+      fontSize={compact ? 0.19 : 0.12}
       color="#9fb0c6"
       anchorX="center"
       anchorY="middle"

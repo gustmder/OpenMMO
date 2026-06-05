@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store'
 
-export const debugVisible = writable(true)
+export const debugVisible = writable(false)
 export const cameraRotationEnabled = writable(false)
 export const calendarVisible = writable(false)
 export const celestialDebugVisible = writable(false)

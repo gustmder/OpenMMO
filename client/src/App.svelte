@@ -316,8 +316,11 @@
   }
 
   main {
-    width: 100vw;
+    width: 100%;
+    max-width: 100vw;
     height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
     position: relative;
   }
 
@@ -334,8 +337,11 @@
 
   .settings-btn-corner {
     position: fixed;
-    bottom: 16px;
-    right: 16px;
+    right: max(16px, calc(env(safe-area-inset-right) + 10px));
+    bottom: max(16px, calc(env(safe-area-inset-bottom) + 10px));
+    box-sizing: border-box;
+    width: 36px;
+    height: 36px;
     z-index: 9999;
     background: rgba(60, 60, 60, 0.85);
     color: #ccc;
@@ -355,7 +361,7 @@
   }
 
   .settings-btn-corner.raised {
-    bottom: 80px;
+    bottom: max(80px, calc(env(safe-area-inset-bottom) + 80px));
   }
 
   .settings-btn-corner svg {

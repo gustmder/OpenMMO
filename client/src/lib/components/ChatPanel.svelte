@@ -68,6 +68,16 @@
     }
   }
 
+  function restoreViewportAfterKeyboard() {
+    for (const delay of [0, 80, 250]) {
+      window.setTimeout(() => {
+        window.scrollTo(0, 0)
+        document.documentElement.scrollTop = 0
+        document.body.scrollTop = 0
+      }, delay)
+    }
+  }
+
   let chatInput = $state<HTMLInputElement>()
 </script>
 
@@ -124,6 +134,7 @@
         bind:this={chatInput}
         bind:value={messageInput}
         onkeydown={handleKeyDown}
+        onblur={restoreViewportAfterKeyboard}
         placeholder="Type a message..."
         disabled={!isConnected}
       />
@@ -294,5 +305,51 @@
   .chat-messages::-webkit-scrollbar-thumb {
     background: #4a5568;
     border-radius: 3px;
+  }
+
+  @media (max-width: 600px), (pointer: coarse) and (max-width: 900px) {
+    .chat-panel {
+      left: max(8px, env(safe-area-inset-left));
+      bottom: calc(max(8px, env(safe-area-inset-bottom)) + 46px);
+      width: min(300px, calc(100vw - 96px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+      height: min(124px, 22dvh);
+      box-sizing: border-box;
+      border-radius: 6px;
+    }
+
+    .tab {
+      padding: 3px 0;
+      font-size: 10px;
+      border-radius: 6px 6px 0 0;
+    }
+
+    .chat-messages {
+      padding: 5px 6px;
+      gap: 2px;
+    }
+
+    .message {
+      font-size: 10px;
+      line-height: 1.25;
+    }
+
+    .chat-input {
+      gap: 4px;
+      border-radius: 0 0 6px 6px;
+    }
+
+    .chat-input input {
+      padding: 4px 6px;
+      font-size: 16px;
+      line-height: 1;
+      border-radius: 0 0 0 6px;
+      min-width: 0;
+    }
+
+    .chat-input button {
+      margin: 2px;
+      padding: 4px 8px;
+      font-size: 11px;
+    }
   }
 </style>

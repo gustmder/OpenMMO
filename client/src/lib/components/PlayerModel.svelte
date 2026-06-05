@@ -79,6 +79,7 @@
     lastDamageInfo?: PlayerDamageInfo
     lastRegenInfo?: PlayerDamageInfo
     torchOn?: boolean
+    torchEffectsDisabled?: boolean
   }
 
   let {
@@ -106,6 +107,7 @@
     lastDamageInfo,
     lastRegenInfo,
     torchOn = false,
+    torchEffectsDisabled = false,
   }: Props = $props()
 
   const DEFAULT_IDLE_INDICES = [
@@ -312,9 +314,11 @@
   // Off-hand equip tracking. Local player uses inventory with a debug-toggle
   // fallback; remote players receive `torchOn` broadcast from the server.
   const equippedOffHandItemId = $derived(
-    isCurrentPlayer
-      ? ($inventoryStore.equipped.off_hand?.item_def_id ?? ($torchLightEnabled ? 'torch' : null))
-      : (torchOn ? 'torch' : null)
+    torchEffectsDisabled
+      ? null
+      : isCurrentPlayer
+        ? ($inventoryStore.equipped.off_hand?.item_def_id ?? ($torchLightEnabled ? 'torch' : null))
+        : (torchOn ? 'torch' : null)
   )
 
   let attachedOffhandItemId: string | null = null

@@ -289,6 +289,12 @@
   .character-create-overlay {
     position: fixed;
     inset: 0;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
     z-index: 1;
     display: flex;
     flex-direction: column;
@@ -300,7 +306,7 @@
 
   .top-bar {
     text-align: center;
-    padding: 32px 16px 0;
+    padding: max(24px, calc(env(safe-area-inset-top) + 12px)) 16px 0;
   }
 
   .title {
@@ -319,7 +325,9 @@
   .create-form {
     position: fixed;
     left: 16px;
-    bottom: 16px;
+    bottom: max(16px, calc(env(safe-area-inset-bottom) + 10px));
+    max-width: calc(100vw - 72px);
+    max-height: calc(100dvh - 92px);
     display: flex;
     align-items: flex-end;
     gap: 10px;
@@ -487,6 +495,123 @@
 
     .create-actions {
       margin-left: 0;
+    }
+  }
+
+  @media (max-width: 600px), (max-height: 700px) {
+    .top-bar {
+      padding-top: max(14px, calc(env(safe-area-inset-top) + 8px));
+    }
+
+    .title {
+      font-size: 22px;
+    }
+
+    .account-name {
+      margin-top: 3px;
+      font-size: 12px;
+    }
+
+    .create-form {
+      left: 10px;
+      bottom: max(10px, calc(env(safe-area-inset-bottom) + 8px));
+      max-width: calc(100vw - 62px);
+      max-height: calc(100dvh - 68px);
+      gap: 8px;
+    }
+
+    .field-label {
+      font-size: 12px;
+    }
+
+    .class-column {
+      gap: 4px;
+      min-width: 104px;
+    }
+
+    .class-btn {
+      padding: 7px 9px;
+      font-size: 13px;
+      line-height: 1.15;
+    }
+
+    .bottom-bar {
+      gap: 8px;
+    }
+
+    .bottom-row {
+      gap: 8px;
+    }
+
+    .gender-field {
+      gap: 4px;
+      min-width: 134px;
+    }
+
+    .gender-buttons {
+      gap: 5px;
+    }
+
+    .gender-buttons .class-btn,
+    .name-field input,
+    .create-actions button {
+      height: 30px;
+    }
+
+    .name-field {
+      gap: 4px;
+    }
+
+    .name-field input {
+      padding: 5px 9px;
+      font-size: 13px;
+    }
+
+    .rolled-attributes {
+      width: 180px;
+      height: 72px;
+      padding: 8px;
+      gap: 4px;
+    }
+
+    .attr {
+      font-size: 12px;
+    }
+
+    .roll-hint {
+      font-size: 11px;
+    }
+
+    .create-actions {
+      gap: 6px;
+    }
+
+    .create-actions button {
+      padding: 5px 9px;
+      font-size: 13px;
+    }
+  }
+
+  @media (max-height: 560px) {
+    .top-bar {
+      padding-top: max(8px, env(safe-area-inset-top));
+    }
+
+    .title {
+      font-size: 18px;
+    }
+
+    .account-name {
+      display: none;
+    }
+
+    .class-column {
+      gap: 3px;
+    }
+
+    .class-btn {
+      padding-top: 6px;
+      padding-bottom: 6px;
     }
   }
 </style>

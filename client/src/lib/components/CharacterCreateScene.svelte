@@ -160,7 +160,7 @@
   position={[0, -0.01, CHARACTER_Z]}
   receiveShadow
 >
-  <T.PlaneGeometry args={[10, 10]} />
+  <T.PlaneGeometry args={[28, 28]} />
   <T.MeshStandardMaterial color="#1a2535" opacity={0.6} transparent />
 </T.Mesh>
 

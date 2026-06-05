@@ -13,29 +13,33 @@ import {
 
 export interface SceneInitResult {
   terrainGeometry: THREE.BufferGeometry
-  waterNormalMap: THREE.Texture
-  waterFoamMapPromise: Promise<THREE.Texture>
-  waterCausticsMapPromise: Promise<THREE.Texture>
-  refractionManager: RefractionRenderManager
-  refractionTexture: THREE.Texture
-  reflectionManager: ReflectionRenderManager
-  reflectionTexture: THREE.Texture
+  waterNormalMap: THREE.Texture | null
+  waterFoamMapPromise: Promise<THREE.Texture | null>
+  waterCausticsMapPromise: Promise<THREE.Texture | null>
+  refractionManager: RefractionRenderManager | null
+  refractionTexture: THREE.Texture | null
+  reflectionManager: ReflectionRenderManager | null
+  reflectionTexture: THREE.Texture | null
 }
 
 export function initScene(
   renderer: WebGPURenderer,
   scene: THREE.Scene,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  options: { skipWaterEffects?: boolean } = {}
 ): SceneInitResult {
-  // Generate environment map
-  renderer.init().then(() => {
-    const pmremGenerator = new PMREMGenerator(renderer)
-    const rt = pmremGenerator.fromScene(new RoomEnvironment())
-    scene.environment = rt.texture
-    scene.environmentIntensity = 0.5
-    pmremGenerator.dispose()
-  })
+  // Generate environment map. Skip on the tightest mobile budget to avoid a
+  // large GPU allocation spike during world entry.
+  if (!options.skipWaterEffects) {
+    renderer.init().then(() => {
+      const pmremGenerator = new PMREMGenerator(renderer)
+      const rt = pmremGenerator.fromScene(new RoomEnvironment())
+      scene.environment = rt.texture
+      scene.environmentIntensity = 0.5
+      pmremGenerator.dispose()
+    })
+  }
 
   // Create terrain geometry
   const terrainGeometry = createTerrainGeometry(
@@ -43,27 +47,38 @@ export function initScene(
     TERRAIN_TILE_SEGMENTS
   )
 
-  // Load water textures
   const loader = new THREE.TextureLoader()
-  const waterNormalMap = loader.load('/textures/waternormals.jpg')
-  waterNormalMap.wrapS = waterNormalMap.wrapT = THREE.RepeatWrapping
+  const waterNormalMap = options.skipWaterEffects
+    ? null
+    : loader.load('/textures/waternormals.jpg')
+  if (waterNormalMap) {
+    waterNormalMap.wrapS = waterNormalMap.wrapT = THREE.RepeatWrapping
+  }
 
-  const waterFoamMapPromise = loadFoamTexture()
-  const waterCausticsMapPromise = loadCausticsTexture()
+  const waterFoamMapPromise = options.skipWaterEffects
+    ? Promise.resolve(null)
+    : loadFoamTexture()
+  const waterCausticsMapPromise = options.skipWaterEffects
+    ? Promise.resolve(null)
+    : loadCausticsTexture()
 
   // Initialize render managers
-  const refractionManager = new RefractionRenderManager(
-    renderer,
-    scene,
-    viewportWidth,
-    viewportHeight
-  )
-  const reflectionManager = new ReflectionRenderManager(
-    renderer,
-    scene,
-    viewportWidth,
-    viewportHeight
-  )
+  const refractionManager = options.skipWaterEffects
+    ? null
+    : new RefractionRenderManager(
+        renderer,
+        scene,
+        viewportWidth,
+        viewportHeight
+      )
+  const reflectionManager = options.skipWaterEffects
+    ? null
+    : new ReflectionRenderManager(
+        renderer,
+        scene,
+        viewportWidth,
+        viewportHeight
+      )
 
   return {
     terrainGeometry,
@@ -71,8 +86,8 @@ export function initScene(
     waterFoamMapPromise,
     waterCausticsMapPromise,
     refractionManager,
-    refractionTexture: refractionManager.texture,
+    refractionTexture: refractionManager?.texture ?? null,
     reflectionManager,
-    reflectionTexture: reflectionManager.texture,
+    reflectionTexture: reflectionManager?.texture ?? null,
   }
 }

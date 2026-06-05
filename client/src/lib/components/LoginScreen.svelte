@@ -157,26 +157,39 @@
 <style>
   .login-container {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
+    inset: 0;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100vw;
     height: 100vh;
+    height: 100dvh;
+    padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
+      max(58px, calc(env(safe-area-inset-bottom) + 58px))
+      max(14px, env(safe-area-inset-left));
+    overflow-x: hidden;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    -webkit-overflow-scrolling: touch;
   }
 
   .login-wrapper {
+    width: min(800px, 100%);
+    min-width: 0;
+    max-height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
   }
 
   .arch-title {
-    width: 800px;
-    height: 350px;
+    width: min(800px, 100%);
+    height: auto;
+    aspect-ratio: 800 / 350;
     margin-bottom: -20px;
     filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.6));
   }
@@ -193,7 +206,9 @@
   }
 
   .login-panel {
-    width: 400px;
+    box-sizing: border-box;
+    width: min(480px, 100%);
+    min-width: 0;
     padding: 40px;
     background: rgba(0, 0, 0, 0.8);
     border: 1px solid #4a5568;
@@ -202,12 +217,15 @@
   }
 
   form {
+    width: 100%;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 20px;
   }
 
   .form-group {
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -222,6 +240,9 @@
   }
 
   .form-group input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
     padding: 12px 14px;
     border: 1px solid #4a5568;
     border-radius: 6px;
@@ -274,6 +295,8 @@
   }
 
   .login-button {
+    box-sizing: border-box;
+    min-width: 0;
     padding: 14px 20px;
     border: none;
     border-radius: 6px;
@@ -304,12 +327,16 @@
   }
 
   .button-row {
+    width: 100%;
+    min-width: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
 
   .create-button {
+    box-sizing: border-box;
+    min-width: 0;
     padding: 14px 20px;
     border: 1px solid #4a5568;
     border-radius: 6px;
@@ -337,5 +364,71 @@
   .create-button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  @media (max-width: 600px), (max-height: 700px) {
+    .login-container {
+      padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+        max(52px, calc(env(safe-area-inset-bottom) + 52px))
+        max(10px, env(safe-area-inset-left));
+    }
+
+    .arch-title {
+      width: min(340px, 100%);
+      margin-bottom: -12px;
+    }
+
+    .title {
+      margin-bottom: 12px;
+      font-size: 13px;
+      letter-spacing: 4px;
+    }
+
+    .login-panel {
+      width: min(320px, 100%);
+      padding: 18px;
+      border-radius: 8px;
+    }
+
+    form {
+      gap: 14px;
+    }
+
+    .form-group {
+      gap: 6px;
+    }
+
+    .form-group input {
+      padding: 10px 12px;
+      font-size: 16px;
+    }
+
+    .kicked-message {
+      margin-bottom: 14px;
+      padding: 10px 12px;
+    }
+
+    .login-button,
+    .create-button {
+      min-width: 0;
+      padding: 12px 8px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+  }
+
+  @media (max-height: 560px) {
+    .login-container {
+      justify-content: flex-start;
+    }
+
+    .arch-title {
+      width: min(320px, 100%);
+      margin-bottom: -10px;
+    }
+
+    .login-panel {
+      padding: 16px;
+    }
   }
 </style>

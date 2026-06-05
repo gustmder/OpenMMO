@@ -4,6 +4,7 @@ import { drainTileWork } from '../../utils/tileWorkQueue'
 import { loadSplatLayers } from '../../utils/splatLayerLoader'
 import { initHousingTextures } from '../../utils/housing-textures'
 import { loadFlowerColorTexture } from '../../shaders/grass-material'
+import { shouldUseMobileRenderBudget } from '../../stores/graphicsSettings'
 import type { TerrainHeightManager } from '../../managers/terrainHeightManager'
 import type GameSceneGrassLayer from './GameSceneGrassLayer.svelte'
 import type GameSceneHousingLayer from './GameSceneHousingLayer.svelte'
@@ -33,6 +34,7 @@ export async function bootstrapSceneAssets(
     grassLayerRef,
     housingLayerRef,
   } = deps
+  const mobileRenderBudget = shouldUseMobileRenderBudget()
 
   // Pre-fetch all tile heightmaps so they're cached when the TerrainLayer
   // $effect fires. This allows work items to be enqueued immediately.
@@ -66,13 +68,15 @@ export async function bootstrapSceneAssets(
   await nextFrame()
   await nextFrame()
 
-  drainTileWork(Infinity)
+  drainTileWork(mobileRenderBudget ? 2 : Infinity)
 
-  // Preallocate all grass slots + seed dummy blades below world so
-  // every compute/render pipeline compiles under the loading dialog
-  // instead of stalling mid-movement when a new sub-chunk activates.
-  grassLayerRef?.warmupGrassPipelines(renderer)
-  housingLayerRef?.warmupHousingPipelines()
+  if (!mobileRenderBudget) {
+    // Preallocate all grass slots + seed dummy blades below world so
+    // every compute/render pipeline compiles under the loading dialog
+    // instead of stalling mid-movement when a new sub-chunk activates.
+    grassLayerRef?.warmupGrassPipelines(renderer)
+    housingLayerRef?.warmupHousingPipelines()
+  }
   // Wind particles: lazy init on first spawn (MeshBasicNodeMaterial
   // compiles fast, not worth blocking the loading screen for)
 }

@@ -1,11 +1,10 @@
 <script lang="ts">
   import { T } from '@threlte/core'
   import * as THREE from 'three'
-  import type { MeshStandardNodeMaterial } from 'three/webgpu'
 
   interface Props {
     geometry: THREE.BufferGeometry
-    material: MeshStandardNodeMaterial
+    material: THREE.Material
     mesh?: THREE.Mesh | undefined
     tileId?: string
     position?: [number, number, number]

@@ -42,6 +42,41 @@ const PRESETS: Record<QualityLevel, GraphicsPreset> = {
 const STORAGE_KEY = 'onlinerpg_graphicsQuality'
 const STORAGE_KEY_APPLIED_AA = 'onlinerpg_appliedAA'
 
+export function shouldUseMobileRenderBudget(): boolean {
+  if (typeof window === 'undefined') return false
+
+  const coarsePointer =
+    window.matchMedia?.('(pointer: coarse)').matches ?? false
+  const narrowViewport = Math.min(window.innerWidth, window.innerHeight) <= 600
+  const touchDevice = navigator.maxTouchPoints > 0
+
+  return touchDevice && (coarsePointer || narrowViewport)
+}
+
+export function shouldUseIphoneRenderBudget(): boolean {
+  if (typeof window === 'undefined') return false
+
+  const ua = navigator.userAgent
+  const explicitIphone = /\biPhone\b/.test(ua)
+  const tinyTouchViewport =
+    navigator.maxTouchPoints > 0 &&
+    Math.min(window.innerWidth, window.innerHeight) <= 430
+
+  return explicitIphone || tinyTouchViewport
+}
+
+function getMobileSafePreset(preset: GraphicsPreset): GraphicsPreset {
+  return {
+    ...preset,
+    pixelRatioCap: Math.min(preset.pixelRatioCap, 1.0),
+    shadowMapSize: Math.min(preset.shadowMapSize, 1024),
+    antialias: false,
+    refraction: false,
+    reflection: false,
+    grassDensity: Math.min(preset.grassDensity, 0.5),
+  }
+}
+
 function loadQuality(): QualityLevel {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
@@ -59,7 +94,7 @@ function loadQuality(): QualityLevel {
  * so `reloadNeeded` can detect mismatches later.
  */
 export function applyInitialAntialias(): boolean {
-  const aa = PRESETS[loadQuality()].antialias
+  const aa = getEffectivePreset(loadQuality()).antialias
   try {
     localStorage.setItem(STORAGE_KEY_APPLIED_AA, String(aa))
   } catch {
@@ -74,7 +109,7 @@ export const graphicsQuality = writable<QualityLevel>(loadQuality())
 export const reloadNeeded = derived(graphicsQuality, (level) => {
   try {
     const appliedAA = localStorage.getItem(STORAGE_KEY_APPLIED_AA) === 'true'
-    return PRESETS[level].antialias !== appliedAA
+    return getEffectivePreset(level).antialias !== appliedAA
   } catch {
     return false
   }
@@ -87,7 +122,7 @@ graphicsQuality.subscribe((level) => {
   } catch {
     // localStorage unavailable
   }
-  const preset = PRESETS[level]
+  const preset = getEffectivePreset(level)
   refractionEnabled.set(preset.refraction)
   reflectionEnabled.set(preset.reflection)
 })
@@ -96,6 +131,13 @@ export function getPreset(level: QualityLevel): GraphicsPreset {
   return PRESETS[level]
 }
 
+export function getEffectivePreset(level: QualityLevel): GraphicsPreset {
+  const preset = PRESETS[level]
+  return shouldUseMobileRenderBudget() || shouldUseIphoneRenderBudget()
+    ? getMobileSafePreset(preset)
+    : preset
+}
+
 export function getCurrentPreset(): GraphicsPreset {
-  return PRESETS[get(graphicsQuality)]
+  return getEffectivePreset(get(graphicsQuality))
 }

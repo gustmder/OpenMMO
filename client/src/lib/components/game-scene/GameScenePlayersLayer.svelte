@@ -46,6 +46,7 @@
     onAttackDuration: (duration: number) => void
     onCurrentPlayerDyingFinished?: () => void
     isCurrentPlayerLoading?: boolean
+    torchEffectsDisabled?: boolean
     playerControl?: PlayerControl
     currentPlayerModel?: PlayerModel | null
     otherPlayerModels?: (PlayerModel | undefined)[]
@@ -71,6 +72,7 @@
     onAttackDuration,
     onCurrentPlayerDyingFinished,
     isCurrentPlayerLoading = $bindable(false),
+    torchEffectsDisabled = false,
     playerControl = $bindable<PlayerControl>(),
     currentPlayerModel = $bindable<PlayerModel | null>(null),
     otherPlayerModels = $bindable<(PlayerModel | undefined)[]>([]),
@@ -122,6 +124,7 @@
   }
 
   function computeUnifiedTorchTarget(): THREE.Vector3 | null {
+    if (torchEffectsDisabled) return null
     if (!currentPlayer) return null
     if (get(localTorchEquipped) || get(torchLightEnabled)) {
       const p = currentPlayer.position
@@ -209,6 +212,7 @@
     bind:isLoading={isCurrentPlayerLoading}
     lastDamageInfo={currentPlayer.lastDamageInfo}
     lastRegenInfo={currentPlayer.lastRegenInfo}
+    {torchEffectsDisabled}
   />
 {/if}
 
@@ -245,6 +249,7 @@
         health={player.health}
         maxHealth={player.maxHealth}
         torchOn={player.torchOn}
+        {torchEffectsDisabled}
       />
     {/if}
   {/each}
@@ -253,20 +258,22 @@
        local torch > closest visible remote torch. castShadow is always true
        (never toggled — toggling triggers WebGPU pipeline recompile stall).
        Position/intensity are driven from the game loop. -->
-  <T.PointLight
-    bind:ref={unifiedTorchLight}
-    position={[0, 0, 0]}
-    color="#ffcc66"
-    intensity={0}
-    distance={TORCH_BASE_DISTANCE}
-    decay={TORCH_BASE_DECAY}
-    castShadow
-    shadow.mapSize.width={512}
-    shadow.mapSize.height={512}
-    shadow.camera.near={0.5}
-    shadow.camera.far={TORCH_BASE_DISTANCE}
-    shadow.bias={-0.005}
-    shadow.normalBias={0.05}
-    shadow.radius={5}
-  />
+  {#if !torchEffectsDisabled}
+    <T.PointLight
+      bind:ref={unifiedTorchLight}
+      position={[0, 0, 0]}
+      color="#ffcc66"
+      intensity={0}
+      distance={TORCH_BASE_DISTANCE}
+      decay={TORCH_BASE_DECAY}
+      castShadow
+      shadow.mapSize.width={512}
+      shadow.mapSize.height={512}
+      shadow.camera.near={0.5}
+      shadow.camera.far={TORCH_BASE_DISTANCE}
+      shadow.bias={-0.005}
+      shadow.normalBias={0.05}
+      shadow.radius={5}
+    />
+  {/if}
 {/if}

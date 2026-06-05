@@ -35,11 +35,14 @@
   const SLOT_DISC_RADIUS = 0.76
   const SLOT_DISC_THICKNESS = 0.1
   const SLOT_DISC_Y = SLOT_DISC_THICKNESS / 2 + 0.002
+  const SLOT_HITBOX_WIDTH = 1.35
+  const SLOT_HITBOX_HEIGHT = 2.5
+  const SLOT_HITBOX_DEPTH = 1.25
   const CHARACTER_Y_OFFSET = SLOT_DISC_THICKNESS
   const PLATFORM_MARGIN_X = 2.8
   const PLATFORM_MARGIN_Z_FRONT = 3.2
   const PLATFORM_MARGIN_Z_BACK = 4.2
-  const PLATFORM_SCALE = 2
+  const PLATFORM_SCALE = 4
   const BASE_PLATFORM_WIDTH = SLOT_SPACING * 2 + PLATFORM_MARGIN_X * 2
   const BASE_PLATFORM_DEPTH =
     PLATFORM_MARGIN_Z_FRONT + PLATFORM_MARGIN_Z_BACK + SLOT_DEPTH
@@ -61,6 +64,9 @@
   // Cast renderer — Threlte types it as WebGLRenderer but we use WebGPURenderer via createRenderer
   const renderer = _renderer as unknown as WebGPURenderer
   let viewportSize = $state({ width: 1, height: 1 })
+  let useCompactSlotLabels = $derived(
+    viewportSize.width <= 600 || viewportSize.height <= 700
+  )
   let cameraPositionZ = $state(8)
 
   let cameraRef = $state<THREE.PerspectiveCamera | undefined>(undefined)
@@ -238,6 +244,8 @@
   <T.Mesh
     position={[SLOT_POSITIONS[slotIndex], SLOT_DISC_Y, SLOT_DEPTH]}
     receiveShadow
+    onclick={() => onSlotClick(slotIndex)}
+    ondblclick={() => onSlotDoubleClick(slotIndex)}
   >
     <T.CylinderGeometry
       args={[SLOT_DISC_RADIUS, SLOT_DISC_RADIUS, SLOT_DISC_THICKNESS, 40]}
@@ -247,6 +255,22 @@
       opacity={1.0}
       transparent
       envMapIntensity={0}
+    />
+  </T.Mesh>
+
+  <T.Mesh
+    position={[SLOT_POSITIONS[slotIndex], SLOT_HITBOX_HEIGHT / 2, SLOT_DEPTH]}
+    onclick={() => onSlotClick(slotIndex)}
+    ondblclick={() => onSlotDoubleClick(slotIndex)}
+  >
+    <T.BoxGeometry
+      args={[SLOT_HITBOX_WIDTH, SLOT_HITBOX_HEIGHT, SLOT_HITBOX_DEPTH]}
+    />
+    <T.MeshBasicMaterial
+      color="#ffffff"
+      opacity={0}
+      transparent
+      depthWrite={false}
     />
   </T.Mesh>
 
@@ -272,5 +296,6 @@
     camera={cameraRef}
     onclick={() => onSlotClick(slotIndex)}
     ondblclick={() => onSlotDoubleClick(slotIndex)}
+    compact={useCompactSlotLabels}
   />
 {/each}
