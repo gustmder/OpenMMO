@@ -32,21 +32,17 @@
   const EMPTY_PANEL_HEIGHT = 0.4
 
   const panelWidth = $derived(
-    character
-      ? compact
-        ? COMPACT_PANEL_WIDTH
-        : CHAR_PANEL_WIDTH
-      : compact
-        ? COMPACT_PANEL_WIDTH
+    compact
+      ? COMPACT_PANEL_WIDTH
+      : character
+        ? CHAR_PANEL_WIDTH
         : EMPTY_PANEL_WIDTH
   )
   const panelHeight = $derived(
-    character
-      ? compact
-        ? COMPACT_PANEL_HEIGHT
-        : CHAR_PANEL_HEIGHT
-      : compact
-        ? COMPACT_PANEL_HEIGHT
+    compact
+      ? COMPACT_PANEL_HEIGHT
+      : character
+        ? CHAR_PANEL_HEIGHT
         : EMPTY_PANEL_HEIGHT
   )
 

@@ -42,7 +42,14 @@ const PRESETS: Record<QualityLevel, GraphicsPreset> = {
 const STORAGE_KEY = 'onlinerpg_graphicsQuality'
 const STORAGE_KEY_APPLIED_AA = 'onlinerpg_appliedAA'
 
+// Device render budgets are constant for the session, so compute each once and
+// cache it. They're read on hot paths (grass streaming, graphics-quality changes)
+// where re-running matchMedia/UA-regex per call would be wasted work.
+let _mobileRenderBudget: boolean | undefined
+let _iphoneRenderBudget: boolean | undefined
+
 export function shouldUseMobileRenderBudget(): boolean {
+  if (_mobileRenderBudget !== undefined) return _mobileRenderBudget
   if (typeof window === 'undefined') return false
 
   const coarsePointer =
@@ -50,10 +57,12 @@ export function shouldUseMobileRenderBudget(): boolean {
   const narrowViewport = Math.min(window.innerWidth, window.innerHeight) <= 600
   const touchDevice = navigator.maxTouchPoints > 0
 
-  return touchDevice && (coarsePointer || narrowViewport)
+  _mobileRenderBudget = touchDevice && (coarsePointer || narrowViewport)
+  return _mobileRenderBudget
 }
 
 export function shouldUseIphoneRenderBudget(): boolean {
+  if (_iphoneRenderBudget !== undefined) return _iphoneRenderBudget
   if (typeof window === 'undefined') return false
 
   const ua = navigator.userAgent
@@ -62,7 +71,8 @@ export function shouldUseIphoneRenderBudget(): boolean {
     navigator.maxTouchPoints > 0 &&
     Math.min(window.innerWidth, window.innerHeight) <= 430
 
-  return explicitIphone || tinyTouchViewport
+  _iphoneRenderBudget = explicitIphone || tinyTouchViewport
+  return _iphoneRenderBudget
 }
 
 function getMobileSafePreset(preset: GraphicsPreset): GraphicsPreset {
@@ -126,10 +136,6 @@ graphicsQuality.subscribe((level) => {
   refractionEnabled.set(preset.refraction)
   reflectionEnabled.set(preset.reflection)
 })
-
-export function getPreset(level: QualityLevel): GraphicsPreset {
-  return PRESETS[level]
-}
 
 export function getEffectivePreset(level: QualityLevel): GraphicsPreset {
   const preset = PRESETS[level]
