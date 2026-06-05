@@ -446,6 +446,16 @@ export function createRiverFieldMaterial(
       float(0.95),
       smoothstep(float(0.05), uMaxDepth, depth)
     ).toVar()
+    // Refraction (the in-shader bed blend) is off in deep water, so the
+    // bed that shows there at night comes from the body alpha never quite
+    // reaching 1 (~0.95) — a torch-lit bed bleeds through the last few
+    // percent of framebuffer transparency. Push deep water to fully
+    // opaque at night/twilight (`1 − dayFactor`), scaled by depth so
+    // shallow banks (low alpha, where the soft edge lives) are untouched.
+    const bedHideByNight = float(1).sub(dayFactor)
+    bodyAlpha.assign(
+      mix(bodyAlpha, float(1.0), bedHideByNight.mul(depthFactor))
+    )
     const seaFade = smoothstep(uSeaFadeBottom, uSeaFadeTop, bedHeight)
     const alpha = float(0.95).mul(depthEdgeCut).mul(bodyAlpha).mul(seaFade)
 
