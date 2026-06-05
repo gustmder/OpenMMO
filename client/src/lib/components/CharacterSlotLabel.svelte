@@ -24,27 +24,15 @@
   let labelGroup = $state<THREE.Group | undefined>(undefined)
 
   // Panel dimensions depend on content
-  const CHAR_PANEL_WIDTH = 1.4
-  const CHAR_PANEL_HEIGHT = 0.95
-  const COMPACT_PANEL_WIDTH = 1.36
-  const COMPACT_PANEL_HEIGHT = 0.46
-  const EMPTY_PANEL_WIDTH = 0.9
-  const EMPTY_PANEL_HEIGHT = 0.4
+  const COMPACT_PANEL = { width: 1.36, height: 0.46 }
+  const CHAR_PANEL = { width: 1.4, height: 0.95 }
+  const EMPTY_PANEL = { width: 0.9, height: 0.4 }
 
-  const panelWidth = $derived(
-    compact
-      ? COMPACT_PANEL_WIDTH
-      : character
-        ? CHAR_PANEL_WIDTH
-        : EMPTY_PANEL_WIDTH
+  const panel = $derived(
+    compact ? COMPACT_PANEL : character ? CHAR_PANEL : EMPTY_PANEL
   )
-  const panelHeight = $derived(
-    compact
-      ? COMPACT_PANEL_HEIGHT
-      : character
-        ? CHAR_PANEL_HEIGHT
-        : EMPTY_PANEL_HEIGHT
-  )
+  const panelWidth = $derived(panel.width)
+  const panelHeight = $derived(panel.height)
 
   const borderColor = $derived(selected ? '#7cc9ff' : '#53657b')
   const bgColor = $derived(selected ? '#223552' : '#141e2c')
