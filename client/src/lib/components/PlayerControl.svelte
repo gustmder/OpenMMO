@@ -919,50 +919,6 @@
         enqueuePlayerControlEvent({ type: 'network_interaction_rejected' }),
     })
 
-    // Debug observability hook for runtime verification of the control FSM.
-    // Read from the browser console / Playwright via `window.__playerFSM`.
-    // Dev-only so it never ships in production builds.
-    if (import.meta.env.DEV && typeof window !== 'undefined') {
-      ;(window as unknown as Record<string, unknown>).__playerFSM = {
-        get stateName() {
-          return playerControlMachine.stateName
-        },
-        get playerState() {
-          return playerState.state
-        },
-        get position() {
-          return currentPlayer
-            ? {
-                x: currentPlayer.position.x,
-                y: currentPlayer.position.y,
-                z: currentPlayer.position.z,
-              }
-            : null
-        },
-        get isMoving() {
-          return isMovingNow()
-        },
-        get movementTarget() {
-          return movingState()?.target ?? null
-        },
-        get currentSpeed() {
-          return currentSpeed
-        },
-        get rotation() {
-          return playerRotation
-        },
-        get isInCombat() {
-          return combatController.isInCombat
-        },
-        get pendingPickup() {
-          return {
-            instanceId: pickingUpState()?.pendingPickupInstanceId ?? null,
-            afterMove: movingState()?.pendingPickupAfterMove ?? null,
-          }
-        },
-      }
-    }
-
     return () => {
       removeInputListeners()
       canvas.removeEventListener('pointermove', handlePointerHover)
@@ -972,9 +928,6 @@
       playerControlMachine.dispose()
       if (standUpTimer) clearTimeout(standUpTimer)
       clearJumpFeedbackTimer()
-      if (import.meta.env.DEV && typeof window !== 'undefined') {
-        delete (window as unknown as Record<string, unknown>).__playerFSM
-      }
     }
   })
 </script>
