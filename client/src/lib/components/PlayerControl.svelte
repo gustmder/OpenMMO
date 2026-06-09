@@ -36,7 +36,6 @@
   } from './player-control/fsm/projection'
   import {
     runMoveRequest,
-    applyStartedClickMovement,
     type MoveRequestActions,
   } from './player-control/fsm/move-request'
   import { runKeyboardFrame } from './player-control/fsm/keyboard'
@@ -49,16 +48,12 @@
   import {
     beginJumpFeedback,
     shouldFinishJumpFeedback,
-    resetMovementRuntimeState,
     transitionToDeadState,
     transitionToRespawnedState,
-    type ControlRuntimeState,
   } from './player-control/fsm/lifecycle'
   import {
     exitPickupInteraction as buildExitPickupInteraction,
-    finishPendingPickup as finishPendingPickupInteraction,
     handlePickupGrab,
-    shouldFinishPendingPickup,
     decidePickupApproach,
     applyObjectInteractionPosition,
     getObjectInteractionExitPosition,
@@ -69,20 +64,15 @@
     getInteractionExitKind,
   } from './player-control/fsm/interaction'
   import {
-    createAttackRuntimePatch,
-    createControlRuntimePatch,
-    createObjectInteractionRuntimePatch,
-    createPickupInteractionRuntimePatch,
-    createStartedMovementRuntimePatch,
-    type PlayerControlRuntimePatch,
-  } from './player-control/fsm/runtime-patch'
-  import {
     beginAttack,
     ensureAttackState,
-    resetAttackInRangeRuntime,
     transitionAttackToIdle,
   } from './player-control/fsm/combat'
-  import type { PlayerControlStateName } from './player-control/fsm/control-state'
+  import type {
+    MovingControlState,
+    PickingUpControlState,
+    PlayerControlStateName,
+  } from './player-control/fsm/control-state'
   import { createLocalPlayerControlMachine } from './player-control/fsm/state-definitions'
 
   interface Props {
@@ -113,14 +103,11 @@
   })
   const { sampleHeight, isMovementBlocked, isUphillTooSteep } = physics
 
-  // Movement system
-  let movementTarget = $state<Position | null>(null)
-  let movementState = $state<MovementState | null>(null)
+  // Movement data (target, integrator, A* waypoints, far-pickup target) lives
+  // inside the machine's `moving` state — see movingState(). Leaving the moving
+  // state drops that data, so there are no movement flags to reset here.
+  // lastSentPosition is kinematic (send dedup), not state-membership data.
   let lastSentPosition = $state<Position | null>(null)
-
-  // A* pathfinding waypoints
-  let pathWaypoints: Array<{ x: number; z: number; floor: number }> = []
-  let currentWaypointIndex = 0
 
   // Use the same movement config as remote players, with debug speed multiplier
   let MOVEMENT_CONFIG = $derived<MovementConfig>({
@@ -181,14 +168,15 @@
     }, JUMP_FEEDBACK_DURATION_MS)
   }
 
-  let pendingPickupInstanceId = $state<number | null>(null)
-  let pendingPickupAfterMoveInstanceId = $state<number | null>(null)
-
+  // Finish the in-flight pickup (settle the ground item) using the id owned by
+  // the picking_up state. Callers always transition away from picking_up right
+  // after, which drops the id — so this finishes exactly once per pickup. This
+  // replaces the old reactive $effect backstop (L5): every path that leaves the
+  // pickup state (stand-up via click/keyboard, anim finish, dead, respawn)
+  // calls finishPendingPickup() explicitly.
   function finishPendingPickup() {
-    pendingPickupInstanceId = finishPendingPickupInteraction(
-      pendingPickupInstanceId,
-      (id) => groundItemManager.finishPickup(id)
-    )
+    const p = pickingUpState()
+    if (p) groundItemManager.finishPickup(p.pendingPickupInstanceId)
   }
 
   function exitPickupInteraction() {
@@ -205,18 +193,14 @@
   }
 
   function onPickupGrab() {
-    handlePickupGrab(pendingPickupInstanceId, {
+    const p = pickingUpState()
+    if (!p) return
+    handlePickupGrab(p.pendingPickupInstanceId, {
       setInHand: (id) => groundItemManager.setInHand(id),
       remove: (id) => groundItemManager.remove(id),
       sendPickupItem: (id) => networkManager.sendPickupItem(id),
     })
   }
-
-  $effect(() => {
-    if (shouldFinishPendingPickup(pendingPickupInstanceId, playerState)) {
-      finishPendingPickup()
-    }
-  })
 
   function exitObjectInteraction(notify = true) {
     if (currentPlayer) {
@@ -245,47 +229,25 @@
     }
   }
 
-  function applyRuntimePatch(patch: PlayerControlRuntimePatch) {
-    // patch.isMoving is intentionally ignored: motion is now the moving state,
-    // not a stored flag. The owning transition is issued explicitly by callers.
-    if (patch.movementTarget !== undefined) movementTarget = patch.movementTarget
-    if (patch.movementState !== undefined) movementState = patch.movementState
-    if (patch.currentSpeed !== undefined) currentSpeed = patch.currentSpeed
-    if (patch.pathWaypoints !== undefined) pathWaypoints = patch.pathWaypoints
-    if (patch.currentWaypointIndex !== undefined) {
-      currentWaypointIndex = patch.currentWaypointIndex
-    }
-    if (patch.pendingPickupAfterMoveInstanceId !== undefined) {
-      pendingPickupAfterMoveInstanceId =
-        patch.pendingPickupAfterMoveInstanceId
-    }
-    if (patch.pendingPickupInstanceId !== undefined) {
-      pendingPickupInstanceId = patch.pendingPickupInstanceId
-    }
-    if (patch.playerRotation !== undefined) playerRotation = patch.playerRotation
-  }
-
-  function applyRuntimeState(runtime: ControlRuntimeState) {
-    applyRuntimePatch(createControlRuntimePatch(runtime))
-  }
-
   function stopMovement() {
-    applyRuntimeState(resetMovementRuntimeState())
     if (standUpTimer) {
       clearTimeout(standUpTimer)
       standUpTimer = null
     }
-    // Settle into idle BEFORE emitting: the projection now derives 'moving' vs
+    currentSpeed = 0
+    // Settle into idle BEFORE emitting: the projection derives 'moving' vs
     // 'idle' from the machine's owned state, so the transition must precede the
-    // emit. arrive() overrides this with pickup/attack right after when needed.
+    // emit. Leaving the moving state also drops its target/movementState/path —
+    // nothing to reset. arrive() overrides idle with pickup/attack right after.
     transitionTo('idle')
     updatePlayerState()
   }
 
-  // Explicitly drive the machine's owned state. The machine no longer derives
-  // its state name from flags — callers transition at the real decision points.
-  function transitionTo(name: PlayerControlStateName) {
-    playerControlMachine.transition(name)
+  // Explicitly drive the machine's owned state to a data-less state. The machine
+  // no longer derives its state name from flags — callers transition at the real
+  // decision points. Stateful transitions (moving/picking_up) carry their data.
+  function transitionTo(name: Exclude<PlayerControlStateName, 'moving' | 'picking_up'>) {
+    playerControlMachine.transition({ name })
   }
 
   // `isMoving` is no longer a stored flag: being in motion IS being in the
@@ -293,6 +255,17 @@
   function isMovingNow(): boolean {
     const name = playerControlMachine.stateName
     return name === 'moving' || name === 'keyboard_moving'
+  }
+
+  // Narrowed views of the machine's owned state, for reading/mutating the data
+  // the active state holds. Null when not in that state.
+  function movingState(): MovingControlState | null {
+    const s = playerControlMachine.state
+    return s.name === 'moving' ? s : null
+  }
+  function pickingUpState(): PickingUpControlState | null {
+    const s = playerControlMachine.state
+    return s.name === 'picking_up' ? s : null
   }
 
   // Wrapper for sending move packets to track last sent position
@@ -390,7 +363,8 @@
 
     if (result.kind === 'ignored_dead_target') return
 
-    applyRuntimePatch(createAttackRuntimePatch(result))
+    // Entering attacking drops any moving-state data (the chase that brought us
+    // here), so there is nothing else to reset.
     setPlayerState(result.nextPlayerState)
     transitionTo('attacking')
   }
@@ -407,8 +381,9 @@
     const transition = transitionToDeadState(playerState)
     if (transition.kind === 'ignored_already_dead') return
 
-    applyRuntimeState(transition.runtime)
     combatController.cancelCombat()
+    // Finish any in-flight pickup while still in picking_up, before the dead
+    // transition drops that state (L5: explicit finish on every pickup exit).
     finishPendingPickup()
 
     setPlayerState(transition.nextPlayerState)
@@ -423,7 +398,6 @@
       y: currentPlayer.position.y,
       z: currentPlayer.position.z,
     })
-    applyRuntimeState(transition.runtime)
     combatController.cancelCombat()
     playerRotation = transition.runtime.playerRotation
     finishPendingPickup()
@@ -450,21 +424,19 @@
   const combatTickActions = {
     stopMovingToIdle: () => {
       if (isMovingNow()) {
-        movementTarget = null
-        movementState = null
-        // Transition before emit so the projection sees idle (chase -> idle).
+        // Leaving the moving state drops its target/movementState. Transition
+        // before emit so the projection sees idle (chase -> idle).
         transitionTo('idle')
         updatePlayerState()
       }
       transitionToIdle()
     },
     prepareReachedAttackRange: () => {
-      movementTarget = null
-      movementState = null
       currentSpeed = 0
-      // Reached range stops movement; settle to idle before the emit. beginAttack
-      // (next, in the same outcome) transitions to attacking; if the target just
-      // died and beginAttack is ignored, we correctly remain idle.
+      // Reached range stops movement (leaving moving drops its data); settle to
+      // idle before the emit. beginAttack (next, same outcome) transitions to
+      // attacking; if the target just died and beginAttack is ignored, we
+      // correctly remain idle.
       transitionTo('idle')
       updatePlayerState()
     },
@@ -474,12 +446,25 @@
       nextMovementState: MovementState,
       nextRotation: number
     ) => {
-      movementTarget = nextMovementTarget
-      movementState = nextMovementState
       playerRotation = nextRotation
       // Chase reports as 'moving' (playerState stays 'moving' while pathing to
-      // the monster); the 'attacking' name is reserved for in-range swinging.
-      transitionTo('moving')
+      // the monster); 'attacking' is reserved for in-range swinging. Update the
+      // live moving state in place (preserving its A* path), or — when chase
+      // resumes from the attacking state — start a fresh pathless moving state.
+      const m = movingState()
+      if (m) {
+        m.target = nextMovementTarget
+        m.movementState = nextMovementState
+      } else {
+        playerControlMachine.transition({
+          name: 'moving',
+          target: nextMovementTarget,
+          movementState: nextMovementState,
+          waypoints: [],
+          waypointIndex: 0,
+          pendingPickupAfterMove: null,
+        })
+      }
     },
     showAttackState: (nextRotation: number) => {
       playerRotation = nextRotation
@@ -508,14 +493,17 @@
     ) => {
       currentSpeed = nextCurrentSpeed
       playerRotation = nextPlayerRotation
-      movementTarget = nextMovementTarget
-      movementState = nextMovementState
-      currentWaypointIndex = nextWaypointIndex
+      const m = movingState()
+      if (m) {
+        m.target = nextMovementTarget
+        m.movementState = nextMovementState
+        m.waypointIndex = nextWaypointIndex
+      }
     },
     arrive: (nextCurrentSpeed: number, nextPlayerRotation: number) => {
       currentSpeed = nextCurrentSpeed
       playerRotation = nextPlayerRotation
-      const pickupAfterArrival = pendingPickupAfterMoveInstanceId
+      const pickupAfterArrival = movingState()?.pendingPickupAfterMove ?? null
       // stopMovement() settles to idle (and emits); the pickup/attack branches
       // below override that state when arrival hands off to them.
       stopMovement()
@@ -544,9 +532,9 @@
     exitPickupInteraction,
     exitObjectInteraction,
     clearClickMovement: () => {
-      movementTarget = null
-      movementState = null
-      pendingPickupAfterMoveInstanceId = null
+      // No-op: keyboard always transitions to keyboard_moving (markMoving),
+      // idle (setKeyboardIdleRuntime), or via stopMovement this same frame, and
+      // leaving the moving state drops its target/movementState/pendingPickup.
     },
     cancelCombat: () => combatController.cancelCombat(),
     markMoving: () => {
@@ -569,16 +557,17 @@
 
   // Update player movement (click-to-move) with acceleration/deceleration
   function updatePlayerMovement(deltaTime: number) {
+    const m = movingState()
     runPlayerMovementTick({
       deltaTime,
       currentPlayer,
       playerStateName: playerState.state,
       isMoving: isMovingNow(),
       currentSpeed,
-      movementTarget,
-      movementState,
-      pathWaypoints,
-      currentWaypointIndex,
+      movementTarget: m?.target ?? null,
+      movementState: m?.movementState ?? null,
+      pathWaypoints: m?.waypoints ?? [],
+      currentWaypointIndex: m?.waypointIndex ?? 0,
       config: MOVEMENT_CONFIG,
       isInCombat: combatController.isInCombat,
       combatController,
@@ -619,7 +608,7 @@
       currentPlayer,
       hasKeysPressed: inputHandler.hasKeysPressed,
       interactionExit: getInteractionExitKind(playerState),
-      hasMovementTarget: movementTarget !== null,
+      hasMovementTarget: movingState() !== null,
       isInCombat: combatController.isInCombat,
       direction: inputHandler.getMovementDirection(),
       config: MOVEMENT_CONFIG,
@@ -639,7 +628,8 @@
   ): MoveRequestActions {
     return {
       clearPendingPickupAfterMove: () => {
-        pendingPickupAfterMoveInstanceId = null
+        const m = movingState()
+        if (m) m.pendingPickupAfterMove = null
       },
       exitPickupAndRetry: () => {
         exitPickupInteraction()
@@ -659,13 +649,18 @@
         }, STAND_UP_DURATION)
       },
       applyStartedMovement: (started) => {
-        const runtime = applyStartedClickMovement(started)
-        const patch = createStartedMovementRuntimePatch(runtime)
-        applyRuntimePatch(patch)
-        // Transition before emit: the projection derives 'moving' from the
-        // machine's owned state.
-        transitionTo('moving')
-        updatePlayerState(patch.totalDistance)
+        playerRotation = started.playerRotation
+        // The moving state OWNS the path data. Transition before emit: the
+        // projection derives 'moving' from the machine's owned state.
+        playerControlMachine.transition({
+          name: 'moving',
+          target: started.movementTarget,
+          movementState: started.movementState,
+          waypoints: started.pathWaypoints,
+          waypointIndex: started.currentWaypointIndex,
+          pendingPickupAfterMove: started.pendingPickupAfterMoveInstanceId,
+        })
+        updatePlayerState(started.movementState.totalDistance)
       },
     }
   }
@@ -707,7 +702,8 @@
       cancelCombat: () => combatController.cancelCombat(),
     })
 
-    applyRuntimePatch(createObjectInteractionRuntimePatch(result))
+    // Entering object_interacting drops any moving data; just face the object.
+    playerRotation = result.playerRotation
     setPlayerState(result.nextPlayerState)
     transitionTo('object_interacting')
 
@@ -732,9 +728,14 @@
 
     if (result.kind === 'ignored') return
 
-    applyRuntimePatch(createPickupInteractionRuntimePatch(result))
+    // The picking_up state OWNS the instance id being grabbed; entering it drops
+    // any moving data (the far-pickup approach that led here).
+    currentSpeed = 0
     setPlayerState(result.nextPlayerState)
-    transitionTo('picking_up')
+    playerControlMachine.transition({
+      name: 'picking_up',
+      pendingPickupInstanceId: result.pendingPickupInstanceId,
+    })
   }
 
   function approachAndPickup(intent: Extract<ClickIntent, { type: 'pickup_ground_item' }>) {
@@ -785,16 +786,17 @@
   function createPlayerControlEventActions(): PlayerControlEventActions {
     return {
       attackInRange: (monsterId) => {
+        // initiateAttack transitions to attacking, which drops any moving data
+        // (no separate runtime reset needed).
         initiateAttack(monsterId)
-        const runtime = resetAttackInRangeRuntime()
-        applyRuntimePatch(runtime)
       },
       chaseAndAttack: (monsterId, hitPoint) => {
         combatController.beginCombat(monsterId, false)
         handleClickToMove(hitPoint)
       },
       toggleDoor: (houseId, roomIndex, wallDir, segmentIndex) => {
-        pendingPickupAfterMoveInstanceId = null
+        const m = movingState()
+        if (m) m.pendingPickupAfterMove = null
         networkManager.sendToggleDoor(houseId, roomIndex, wallDir, segmentIndex)
       },
       enterInteraction,
@@ -941,7 +943,7 @@
           return isMovingNow()
         },
         get movementTarget() {
-          return movementTarget
+          return movingState()?.target ?? null
         },
         get currentSpeed() {
           return currentSpeed
@@ -953,7 +955,10 @@
           return combatController.isInCombat
         },
         get pendingPickup() {
-          return { instanceId: pendingPickupInstanceId, afterMove: pendingPickupAfterMoveInstanceId }
+          return {
+            instanceId: pickingUpState()?.pendingPickupInstanceId ?? null,
+            afterMove: movingState()?.pendingPickupAfterMove ?? null,
+          }
         },
       }
     }

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { ControlState } from './control-state'
 import {
   composePlayerControlStateOverrides,
   createAnimationEventStateOverrides,
@@ -285,7 +286,7 @@ describe('createLocalPlayerControlMachine', () => {
     })
 
     // The picking_up state's handleEvent consumes anim_pickup_grab → onPickupGrab.
-    machine.transition('picking_up')
+    machine.transition({ name: 'picking_up' } as ControlState)
     machine.update(16, {
       editorMode: false,
       events: [{ type: 'anim_pickup_grab' }],

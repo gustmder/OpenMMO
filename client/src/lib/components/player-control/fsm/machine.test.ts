@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { ControlState } from './control-state'
 import type { PlayerControlEvent } from './events'
 import { PlayerControlMachine } from './machine'
 import { createPlayerControlStateDefinitions } from './state-definitions'
@@ -91,7 +92,7 @@ describe('PlayerControlMachine', () => {
           // A tick that does NOT call transition must leave the state unchanged.
           idle: { tick: () => undefined },
         }),
-        initialStateName: 'idle',
+        initialState: { name: 'idle' },
       }
     )
 
@@ -99,7 +100,7 @@ describe('PlayerControlMachine', () => {
     machine.update(16, { editorMode: false })
     expect(machine.stateName).toBe('idle')
 
-    machine.transition('moving')
+    machine.transition({ name: 'moving' } as ControlState)
     expect(machine.stateName).toBe('moving')
   })
 
@@ -118,11 +119,11 @@ describe('PlayerControlMachine', () => {
             exit: () => calls.push('exit:moving'),
           },
         }),
-        initialStateName: 'idle',
+        initialState: { name: 'idle' },
       }
     )
 
-    machine.transition('moving')
+    machine.transition({ name: 'moving' } as ControlState)
     machine.dispose()
 
     expect(calls).toEqual([
@@ -144,11 +145,11 @@ describe('PlayerControlMachine', () => {
             exit: () => calls.push('exit:idle'),
           },
         }),
-        initialStateName: 'idle',
+        initialState: { name: 'idle' },
       }
     )
 
-    machine.transition('idle')
+    machine.transition({ name: 'idle' })
 
     expect(machine.stateName).toBe('idle')
     expect(calls).toEqual(['enter:idle'])

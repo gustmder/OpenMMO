@@ -1,5 +1,5 @@
 import type { PlayerControlEvent, PlayerControlUpdateOptions } from './events'
-import type { PlayerControlStateName } from './control-state'
+import type { ControlState } from './control-state'
 import type { PlayerControlStateDefinitions } from './state-definitions'
 
 export interface PlayerControlMachineHandlers {
@@ -8,24 +8,33 @@ export interface PlayerControlMachineHandlers {
 
 export interface PlayerControlMachineOptions {
   states?: PlayerControlStateDefinitions
-  initialStateName?: PlayerControlStateName
+  initialState?: ControlState
 }
 
 export class PlayerControlMachine {
   private queuedEvents: PlayerControlEvent[] = []
   private disposed = false
-  private currentStateName: PlayerControlStateName
+  private currentState: ControlState
 
   constructor(
     private readonly handlers: PlayerControlMachineHandlers,
     private readonly options: PlayerControlMachineOptions = {}
   ) {
-    this.currentStateName = options.initialStateName ?? 'idle'
-    this.enterState(this.currentStateName)
+    this.currentState = options.initialState ?? { name: 'idle' }
+    this.enterState(this.currentState.name)
   }
 
   get stateName() {
-    return this.currentStateName
+    return this.currentState.name
+  }
+
+  /**
+   * The machine's owned current state object, including any data the active
+   * state holds (e.g. `moving` carries its target/movementState/waypoints).
+   * Callers narrow on `.name` to read/mutate that data in place.
+   */
+  get state(): ControlState {
+    return this.currentState
   }
 
   /**
@@ -33,14 +42,18 @@ export class PlayerControlMachine {
    * only through this method, never by polling/deriving a name from external
    * flags. Callers transition at the actual decision points (move start,
    * arrival, attack, interact enter/exit, dead/respawn, jump). A transition to
-   * the state we are already in is a no-op (no exit/enter re-fire).
+   * a different state object with the same name still swaps the object (to
+   * carry new data) but does not re-fire exit/enter.
    */
-  transition(nextStateName: PlayerControlStateName) {
+  transition(next: ControlState) {
     if (this.disposed) return
-    if (nextStateName === this.currentStateName) return
-    this.exitState(this.currentStateName)
-    this.currentStateName = nextStateName
-    this.enterState(nextStateName)
+    if (next.name === this.currentState.name) {
+      this.currentState = next
+      return
+    }
+    this.exitState(this.currentState.name)
+    this.currentState = next
+    this.enterState(next.name)
   }
 
   enqueueEvent(event: PlayerControlEvent) {
@@ -73,39 +86,39 @@ export class PlayerControlMachine {
 
   dispose() {
     if (this.disposed) return
-    this.exitState(this.currentStateName)
+    this.exitState(this.currentState.name)
     this.disposed = true
     this.queuedEvents = []
   }
 
-  private enterState(stateName: PlayerControlStateName) {
+  private enterState(stateName: ControlState['name']) {
     this.options.states?.[stateName]?.enter?.()
   }
 
-  private exitState(stateName: PlayerControlStateName) {
+  private exitState(stateName: ControlState['name']) {
     this.options.states?.[stateName]?.exit?.()
   }
 
-  private get currentState() {
-    return this.options.states?.[this.currentStateName]
+  private get currentDefinition() {
+    return this.options.states?.[this.currentState.name]
   }
 
   private dispatchEvent(event: PlayerControlEvent) {
-    const consumed = this.currentState?.handleEvent?.(event) === true
+    const consumed = this.currentDefinition?.handleEvent?.(event) === true
     if (!consumed) {
       this.handlers.dispatchEvent(event)
     }
   }
 
   private handleInteractKey() {
-    this.currentState?.handleInteractKey?.()
+    this.currentDefinition?.handleInteractKey?.()
   }
 
   private handleKeyboard() {
-    this.currentState?.handleKeyboard?.()
+    this.currentDefinition?.handleKeyboard?.()
   }
 
   private tick(deltaTime: number) {
-    this.currentState?.tick?.(deltaTime)
+    this.currentDefinition?.tick?.(deltaTime)
   }
 }
