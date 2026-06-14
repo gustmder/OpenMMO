@@ -28,9 +28,10 @@ import {
   HOUSING_TEXTURES,
   type GeoEntry,
 } from './house-geo-utils'
-import type {
-  DungeonFloorLayout,
-  DungeonShaft,
+import {
+  shaftCoverRun,
+  type DungeonFloorLayout,
+  type DungeonShaft,
 } from '../managers/dungeonManager'
 
 export const DUNGEON_WALL_TEXTURE_IDX = HOUSING_TEXTURES.findIndex(
@@ -254,9 +255,27 @@ function collectShaftStairs(
     const runC = (a + b) / 2
     const runLenAbs = Math.abs(b - a)
     if (shaft.alongZ) {
-      addBox(entries, DUNGEON_FLOOR_TEXTURE_IDX, ctx.shaftW, h, runLenAbs, latCenter, cy, runC)
+      addBox(
+        entries,
+        DUNGEON_FLOOR_TEXTURE_IDX,
+        ctx.shaftW,
+        h,
+        runLenAbs,
+        latCenter,
+        cy,
+        runC
+      )
     } else {
-      addBox(entries, DUNGEON_FLOOR_TEXTURE_IDX, runLenAbs, h, ctx.shaftW, runC, cy, latCenter)
+      addBox(
+        entries,
+        DUNGEON_FLOOR_TEXTURE_IDX,
+        runLenAbs,
+        h,
+        ctx.shaftW,
+        runC,
+        cy,
+        latCenter
+      )
     }
   }
 
@@ -289,9 +308,27 @@ function collectShaftStairs(
     const wallH = topY - bottomY + ctx.wallHeight
     const wallCy = bottomY + wallH / 2
     if (shaft.alongZ) {
-      addBox(entries, wallTex, 0.1, wallH, r.d, r.x + r.w + 0.05, wallCy, r.z + r.d / 2)
+      addBox(
+        entries,
+        wallTex,
+        0.1,
+        wallH,
+        r.d,
+        r.x + r.w + 0.05,
+        wallCy,
+        r.z + r.d / 2
+      )
     } else {
-      addBox(entries, wallTex, r.w, wallH, 0.1, r.x + r.w / 2, wallCy, r.z - 0.05)
+      addBox(
+        entries,
+        wallTex,
+        r.w,
+        wallH,
+        0.1,
+        r.x + r.w / 2,
+        wallCy,
+        r.z - 0.05
+      )
     }
   }
 }
@@ -436,11 +473,13 @@ export function buildDungeonFloorGroup(
  * roof — a small roofed shed over the stairs. The entry end stays open as
  * an ABOVE-tall doorway.
  *
- * The footprint covers only the 6-cell tread span: the one landing cell at
- * each end is left to the terrain (shaftHoleRect insets both ends to match),
- * trimming the old 8-cell length. The inset is symmetric, so `reversed`
- * doesn't change the footprint. The stairs still match the floor-1 up-shaft
- * in world space, so the depth-0↔1 swap at the midpoint is seamless.
+ * The covered footprint is anchored at the entry (shallow) end — one landing
+ * cell gap, then half the tread span toward the deep end — so the shed is a
+ * compact porch over the upper stairs (shaftHoleRect insets the deep end to
+ * match). The stairs themselves are still built full-length, so the lower half
+ * continues descending under the terrain past the porch's far wall (which lands
+ * on the shaft midpoint, where the depth-0↔1 swap hides this group anyway). The
+ * anchored inset depends on `reversed` (which end is the entry).
  *
  * The returned `ceiling` is a sub-group the layer hides as the player nears
  * (an iso-camera ceiling would otherwise occlude them on the upper stairs —
@@ -460,11 +499,18 @@ export function buildDungeonEntranceGroup(
   const ceilingEntries: GeoEntry[] = []
   const r = shaftRect(entranceShaft, ctx)
 
-  // Covered footprint: the tread span only, inset by one landing cell at each
-  // end. Symmetric inset → independent of `reversed`.
+  // Covered footprint: anchored at the entry (shallow) end with a one-cell
+  // landing gap, then running half the tread span toward the deep end (the
+  // remaining lower stairs continue under the terrain). shaftCoverRun is the
+  // single source the terrain hole (shaftHoleRect) also uses, so the two stay
+  // in lockstep.
+  const { inset, coverLen } = shaftCoverRun(
+    ctx.shaftLen,
+    entranceShaft.reversed
+  )
   const cr = entranceShaft.alongZ
-    ? { x: r.x, w: r.w, z: r.z + LANDING_CELLS, d: r.d - LANDING_CELLS * 2 }
-    : { x: r.x + LANDING_CELLS, w: r.w - LANDING_CELLS * 2, z: r.z, d: r.d }
+    ? { x: r.x, w: r.w, z: r.z + inset, d: coverLen }
+    : { x: r.x + inset, w: coverLen, z: r.z, d: r.d }
 
   // How far the walls descend — matches the up-shaft drop to floor 1.
   const depth = ctx.floorHeight
@@ -499,15 +545,69 @@ export function buildDungeonEntranceGroup(
   // Deep/far end is the high-coordinate end unless the shaft runs reversed.
   const farPositive = !entranceShaft.reversed
   if (entranceShaft.alongZ) {
-    addBox(entries, DUNGEON_WALL_TEXTURE_IDX, T, wallH, cr.d + T, cr.x - T / 2, wallCy, cr.z + cr.d / 2)
-    addBox(entries, DUNGEON_WALL_TEXTURE_IDX, T, wallH, cr.d + T, cr.x + cr.w + T / 2, wallCy, cr.z + cr.d / 2)
+    addBox(
+      entries,
+      DUNGEON_WALL_TEXTURE_IDX,
+      T,
+      wallH,
+      cr.d + T,
+      cr.x - T / 2,
+      wallCy,
+      cr.z + cr.d / 2
+    )
+    addBox(
+      entries,
+      DUNGEON_WALL_TEXTURE_IDX,
+      T,
+      wallH,
+      cr.d + T,
+      cr.x + cr.w + T / 2,
+      wallCy,
+      cr.z + cr.d / 2
+    )
     const farZ = farPositive ? cr.z + cr.d + T / 2 : cr.z - T / 2
-    addBox(entries, DUNGEON_WALL_TEXTURE_IDX, cr.w + T * 2, wallH, T, cr.x + cr.w / 2, wallCy, farZ)
+    addBox(
+      entries,
+      DUNGEON_WALL_TEXTURE_IDX,
+      cr.w + T * 2,
+      wallH,
+      T,
+      cr.x + cr.w / 2,
+      wallCy,
+      farZ
+    )
   } else {
-    addBox(entries, DUNGEON_WALL_TEXTURE_IDX, cr.w + T, wallH, T, cr.x + cr.w / 2, wallCy, cr.z - T / 2)
-    addBox(entries, DUNGEON_WALL_TEXTURE_IDX, cr.w + T, wallH, T, cr.x + cr.w / 2, wallCy, cr.z + cr.d + T / 2)
+    addBox(
+      entries,
+      DUNGEON_WALL_TEXTURE_IDX,
+      cr.w + T,
+      wallH,
+      T,
+      cr.x + cr.w / 2,
+      wallCy,
+      cr.z - T / 2
+    )
+    addBox(
+      entries,
+      DUNGEON_WALL_TEXTURE_IDX,
+      cr.w + T,
+      wallH,
+      T,
+      cr.x + cr.w / 2,
+      wallCy,
+      cr.z + cr.d + T / 2
+    )
     const farX = farPositive ? cr.x + cr.w + T / 2 : cr.x - T / 2
-    addBox(entries, DUNGEON_WALL_TEXTURE_IDX, T, wallH, cr.d + T * 2, farX, wallCy, cr.z + cr.d / 2)
+    addBox(
+      entries,
+      DUNGEON_WALL_TEXTURE_IDX,
+      T,
+      wallH,
+      cr.d + T * 2,
+      farX,
+      wallCy,
+      cr.z + cr.d / 2
+    )
   }
 
   // Gabled gravel-stone roof on top, ridge along the run axis. The gable
@@ -535,7 +635,16 @@ export function buildDungeonEntranceGroup(
   // Descending stairs (no side wall — the walls above supply the sides; no
   // landings — terrain covers the entry row, the dark pit floor backs the deep
   // end). Same world-space geometry as the floor-1 up-shaft.
-  collectShaftStairs(entries, entranceShaft, ctx, 0, -depth, false, false, false)
+  collectShaftStairs(
+    entries,
+    entranceShaft,
+    ctx,
+    0,
+    -depth,
+    false,
+    false,
+    false
+  )
 
   const group = new THREE.Group()
   addMergedMeshes(group, entries)

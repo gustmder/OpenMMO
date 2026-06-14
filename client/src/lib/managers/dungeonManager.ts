@@ -107,11 +107,29 @@ export interface DungeonFloorCells {
 }
 
 /**
- * World-space XZ rect of a shaft's surface opening — the footprint minus the
- * one-cell landing row at *both* ends, leaving just the 6-cell tread span.
- * This matches the covered entrance structure (buildDungeonEntranceGroup),
- * so terrain/grass meet the parapet on every side. The symmetric inset makes
- * it independent of `reversed`.
+ * Covered run-range of a shaft's surface opening, along the run axis: the
+ * inset from the shaft origin to the covered span's near edge, plus the span
+ * length. Anchored at the entry (shallow) end — a one-cell landing gap, then
+ * half the tread span toward the deep end. Shared by shaftHoleRect (terrain
+ * hole) and buildDungeonEntranceGroup (parapet/roof footprint) so the two
+ * never desync.
+ */
+export function shaftCoverRun(
+  shaftLen: number,
+  reversed: boolean
+): { inset: number; coverLen: number } {
+  const coverLen = (shaftLen - LANDING_CELLS * 2) / 2
+  // Reversed → entry is the high-coordinate end, so the cover sits one
+  // landing gap plus its own length in from the low (deep) side.
+  const deepInset = LANDING_CELLS + coverLen
+  return { inset: reversed ? deepInset : LANDING_CELLS, coverLen }
+}
+
+/**
+ * World-space XZ rect of a shaft's surface opening (see shaftCoverRun for the
+ * covered span). Matches the covered entrance structure
+ * (buildDungeonEntranceGroup), so terrain/grass meet the parapet on every side;
+ * the lower stairs stay under the terrain past the deep end.
  */
 function shaftHoleRect(
   shaft: DungeonShaft,
@@ -120,15 +138,16 @@ function shaftHoleRect(
   shaftW: number,
   shaftLen: number
 ): DungeonRect {
+  const { inset, coverLen } = shaftCoverRun(shaftLen, shaft.reversed)
   let minX: number, maxX: number, minZ: number, maxZ: number
   if (shaft.alongZ) {
     minX = shaft.x
     maxX = shaft.x + shaftW
-    minZ = shaft.z + LANDING_CELLS
-    maxZ = shaft.z + shaftLen - LANDING_CELLS
+    minZ = shaft.z + inset
+    maxZ = shaft.z + inset + coverLen
   } else {
-    minX = shaft.x + LANDING_CELLS
-    maxX = shaft.x + shaftLen - LANDING_CELLS
+    minX = shaft.x + inset
+    maxX = shaft.x + inset + coverLen
     minZ = shaft.z
     maxZ = shaft.z + shaftW
   }
