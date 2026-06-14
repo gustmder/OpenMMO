@@ -65,6 +65,10 @@ export const DUNGEON_PILLAR_TEXTURE_IDX = HOUSING_TEXTURES.findIndex(
   (e) => e.glb === 'housing/medieval_blocks_03_1k'
 )
 
+/** Name of the up-shaft stairs sub-group inside a floor group; the dungeon
+ *  layer looks it up to fade it to a ghost when it occludes the player. */
+export const UP_SHAFT_GROUP_NAME = 'upShaftStairs'
+
 const SLAB_THICKNESS = 0.15
 /** Flat landing cells at shaft ends — must match dungeonManager.rampY. */
 const LANDING_CELLS = 1.0
@@ -151,7 +155,7 @@ function addGableRoof(
   cz: number,
   runLen: number,
   latW: number,
-  baseY: number,
+  bottomY: number,
   rise: number,
   oh: number,
   endOh: number,
@@ -197,7 +201,7 @@ function addGableRoof(
       geo.applyMatrix4(_roofMat)
     }
     const perpCenter = (side * (halfLat + oh)) / 2
-    const yCenter = baseY + (rise - eaveDropY) / 2
+    const yCenter = bottomY + (rise - eaveDropY) / 2
     const tx = cx + (alongZ ? perpCenter : 0)
     const tz = cz + (alongZ ? 0 : perpCenter)
     _roofMat.makeTranslation(tx, yCenter, tz)
@@ -205,7 +209,7 @@ function addGableRoof(
     entries.push({ geo, textureIndex: texIdx })
   }
 
-  // Triangular gable wall at each run-axis end (base at baseY, apex at ridge).
+  // Triangular gable wall at each run-axis end (base at bottomY, apex at ridge).
   for (const endSign of [-1, 1] as const) {
     if (endSign === omitEndSign) continue
     const shape = new THREE.Shape()
@@ -222,7 +226,7 @@ function addGableRoof(
     geo.applyMatrix4(_roofMat)
     const tx = cx + (alongZ ? 0 : (endSign * runLen) / 2)
     const tz = cz + (alongZ ? (endSign * runLen) / 2 : 0)
-    _roofMat.makeTranslation(tx, baseY, tz)
+    _roofMat.makeTranslation(tx, bottomY, tz)
     geo.applyMatrix4(_roofMat)
     entries.push({ geo, textureIndex: texIdx })
   }
@@ -554,14 +558,141 @@ function collectShaftStairs(
   if (includeTopLanding) {
     addRunBox(0, LANDING_CELLS, SLAB_THICKNESS, topY - SLAB_THICKNESS / 2)
   }
-  // Solid steps: each box rises from the deep landing up to its tread.
-  for (let i = 0; i < stepCount; i++) {
-    const t0 = runStart + i * stepDepth
-    const t1 = t0 + stepDepth
-    const treadY = topY - (i + 0.5) * stepRise
-    const h = treadY - bottomY
-    addRunBox(t0, t1, h, bottomY + h / 2)
+
+  // Steps as a single watertight solid (a stepped prism) rather than one
+  // closed box per tread. Stacked boxes share internal faces that are hidden
+  // when opaque but show through once the up-shaft fades to a ghost; a single
+  // hull keeps only the outer surface (treads, risers, end faces, the two
+  // stepped side profiles, and a flat underside). Opaque look is unchanged.
+  {
+    const w = ctx.shaftW
+    const hw = w / 2
+    const endU = runStart + stepCount * stepDepth
+    const treadY = (i: number) => topY - (i + 0.5) * stepRise
+    const tAt = (i: number) => runStart + i * stepDepth
+    // Local point for run-coordinate t, height y, lateral offset latOff.
+    const pt = (t: number, y: number, latOff: number) => {
+      const run = runAt(t)
+      return shaft.alongZ
+        ? new THREE.Vector3(latCenter + latOff, y, run)
+        : new THREE.Vector3(run, y, latCenter + latOff)
+    }
+
+    const positions: number[] = []
+    const normals: number[] = []
+    const uvs: number[] = []
+    const indices: number[] = []
+    // Quad in CCW order around its rectangle; winding is corrected against the
+    // outward normal, and UVs use the same axis-projection as addBox (scaled).
+    const addQuad = (
+      c0: THREE.Vector3,
+      c1: THREE.Vector3,
+      c2: THREE.Vector3,
+      c3: THREE.Vector3,
+      n: THREE.Vector3
+    ) => {
+      const base = positions.length / 3
+      const gn = c1.clone().sub(c0).cross(c2.clone().sub(c0))
+      const verts = gn.dot(n) < 0 ? [c0, c3, c2, c1] : [c0, c1, c2, c3]
+      const ax = Math.abs(n.x)
+      const ay = Math.abs(n.y)
+      const az = Math.abs(n.z)
+      for (const c of verts) {
+        positions.push(c.x, c.y, c.z)
+        normals.push(n.x, n.y, n.z)
+        let u: number, v: number
+        if (ax >= ay && ax >= az) {
+          u = c.z
+          v = c.y
+        } else if (ay >= ax && ay >= az) {
+          u = c.x
+          v = c.z
+        } else {
+          u = c.x
+          v = c.y
+        }
+        uvs.push(u * DUNGEON_FLOOR_UV_SCALE, v * DUNGEON_FLOOR_UV_SCALE)
+      }
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3)
+    }
+
+    // Run-axis world direction (+t) and lateral axis, accounting for reversed.
+    const sgn = shaft.reversed ? -1 : 1
+    const runDir = shaft.alongZ
+      ? new THREE.Vector3(0, 0, sgn)
+      : new THREE.Vector3(sgn, 0, 0)
+    const minusRun = runDir.clone().negate()
+    const latAxis = shaft.alongZ
+      ? new THREE.Vector3(1, 0, 0)
+      : new THREE.Vector3(0, 0, 1)
+    const downN = new THREE.Vector3(0, -1, 0)
+    const upN = new THREE.Vector3(0, 1, 0)
+
+    for (let i = 0; i < stepCount; i++) {
+      const ty = treadY(i)
+      // Stepped side profile on both lateral faces (one rectangle per tread).
+      for (const s of [-1, 1] as const) {
+        const n = latAxis.clone().multiplyScalar(s)
+        addQuad(
+          pt(tAt(i), bottomY, s * hw),
+          pt(tAt(i + 1), bottomY, s * hw),
+          pt(tAt(i + 1), ty, s * hw),
+          pt(tAt(i), ty, s * hw),
+          n
+        )
+      }
+      // Tread (top).
+      addQuad(
+        pt(tAt(i), ty, -hw),
+        pt(tAt(i + 1), ty, -hw),
+        pt(tAt(i + 1), ty, hw),
+        pt(tAt(i), ty, hw),
+        upN
+      )
+      // Riser to the next (lower) tread, facing down-run.
+      if (i < stepCount - 1) {
+        const tb = tAt(i + 1)
+        addQuad(
+          pt(tb, treadY(i + 1), -hw),
+          pt(tb, treadY(i + 1), hw),
+          pt(tb, ty, hw),
+          pt(tb, ty, -hw),
+          runDir
+        )
+      }
+    }
+    // Underside (flat at the bottom landing).
+    addQuad(
+      pt(runStart, bottomY, -hw),
+      pt(endU, bottomY, -hw),
+      pt(endU, bottomY, hw),
+      pt(runStart, bottomY, hw),
+      downN
+    )
+    // Shallow-end face (under the top landing) and deep-end face.
+    addQuad(
+      pt(runStart, bottomY, -hw),
+      pt(runStart, bottomY, hw),
+      pt(runStart, treadY(0), hw),
+      pt(runStart, treadY(0), -hw),
+      minusRun
+    )
+    addQuad(
+      pt(endU, bottomY, -hw),
+      pt(endU, bottomY, hw),
+      pt(endU, treadY(stepCount - 1), hw),
+      pt(endU, treadY(stepCount - 1), -hw),
+      runDir
+    )
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+    geo.setIndex(indices)
+    entries.push({ geo, textureIndex: DUNGEON_FLOOR_TEXTURE_IDX })
   }
+
   if (includeBottomLanding) {
     addRunBox(
       ctx.shaftLen - LANDING_CELLS,
@@ -605,6 +736,13 @@ function collectShaftStairs(
   }
 }
 
+export interface DungeonFloorGroup {
+  group: THREE.Group
+  /** Local-space AABB of the up-shaft stairs sub-group, for the layer's
+   *  occlusion-fade test (add the group's world position to use it). */
+  upShaftAABB: THREE.Box3
+}
+
 /**
  * Build the renderable group for one dungeon floor. The caller positions
  * it at (originX, floorY(depth), originZ) in world space.
@@ -612,7 +750,7 @@ function collectShaftStairs(
 export function buildDungeonFloorGroup(
   layout: DungeonFloorLayout,
   ctx: DungeonGeoCtx
-): THREE.Group {
+): DungeonFloorGroup {
   const grid = ctx.grid
   const carvedAt = (x: number, z: number) =>
     x >= 0 && x < grid && z >= 0 && z < grid && layout.carved[x + z * grid]
@@ -716,24 +854,45 @@ export function buildDungeonFloorGroup(
     addBox(entries, DUNGEON_FLOOR_TEXTURE_IDX, 0.98, 0.04, 0.1, x, 0.45, z)
   }
 
-  // --- Stairs: the up shaft descends from the floor above (+floorHeight
-  // → 0); the down shaft from here to the floor below (0 → -floorHeight).
-  collectShaftStairs(
-    entries,
-    layout.upShaft,
-    ctx,
-    ctx.floorHeight,
-    0,
-    true, // top landing: neighbour floor's slab is not rendered
-    false // bottom landing: this floor's slab covers the exit row
-  )
+  // --- Down shaft (0 → -floorHeight) merges with the floor geometry.
   if (down) {
     collectShaftStairs(entries, down, ctx, 0, -ctx.floorHeight, false, true)
   }
 
   const group = new THREE.Group()
   addMergedMeshes(group, entries)
-  return group
+
+  // --- Up shaft (descends from the floor above, +floorHeight → 0): the
+  // staircase you arrive by. Built into its own sub-group so the dungeon layer
+  // can fade it to a ghost material when it occludes the player from the iso
+  // camera (it shares the floor texture, so it can't fade while merged in).
+  // Its side wall is omitted: the steps are blocked by an impassable flag, so
+  // no wall is needed to contain the player, and a wall would only block the
+  // view down the stairs.
+  const upEntries: GeoEntry[] = []
+  collectShaftStairs(
+    upEntries,
+    layout.upShaft,
+    ctx,
+    ctx.floorHeight,
+    0,
+    true, // top landing: neighbour floor's slab is not rendered
+    false, // bottom landing: this floor's slab covers the exit row
+    false // no side wall
+  )
+  const upGroup = new THREE.Group()
+  upGroup.name = UP_SHAFT_GROUP_NAME
+  addMergedMeshes(upGroup, upEntries)
+  group.add(upGroup)
+
+  // Local-space occlusion AABB: the shaft footprint from this floor (y=0) up to
+  // the floor above. The layer adds the group's world position before testing.
+  const ur = shaftRect(layout.upShaft, ctx)
+  const upShaftAABB = new THREE.Box3(
+    new THREE.Vector3(ur.x, 0, ur.z),
+    new THREE.Vector3(ur.x + ur.w, ctx.floorHeight, ur.z + ur.d)
+  )
+  return { group, upShaftAABB }
 }
 
 /**

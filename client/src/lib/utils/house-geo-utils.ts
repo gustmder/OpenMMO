@@ -178,6 +178,9 @@ export function addMergedMeshes(
       const mesh = new THREE.Mesh(merged, getHousingMaterial(texIdx))
       mesh.castShadow = true
       mesh.receiveShadow = true
+      // Record the source texture index so any caller can look up a matching
+      // material variant for this mesh (e.g. a ghost material for fading).
+      mesh.userData.textureIndex = texIdx
       group.add(mesh)
       count++
     }

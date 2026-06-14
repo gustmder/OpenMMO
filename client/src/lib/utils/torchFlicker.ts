@@ -3,6 +3,13 @@ import type * as THREE from 'three'
 export const TORCH_BASE_INTENSITY = 50
 export const TORCH_BASE_DISTANCE = 50
 export const TORCH_BASE_DECAY = 1.2
+/** Shadow-camera far plane for the torch point light. Smaller than the light's
+ *  illumination range (TORCH_BASE_DISTANCE): with decay 1.2 the light is only
+ *  ~7% as bright at 25m as up close, so shadows past here are imperceptible.
+ *  Keeping the far plane tight (vs the full 50m) tightens perspective depth
+ *  precision, which lets the shadow bias stay small and avoids peter-panning
+ *  (shadows floating off the floor). */
+export const TORCH_SHADOW_FAR = 25
 export const TORCH_BASE_POSITION = { x: -0.5, y: 3.0, z: 0.3 } as const
 
 export interface TorchFlickerState {

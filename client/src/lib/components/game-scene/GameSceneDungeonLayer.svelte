@@ -21,7 +21,10 @@
     buildDungeonEntranceGroup,
     buildDungeonFloorGroup,
     disposeDungeonGroup,
+    UP_SHAFT_GROUP_NAME,
   } from '../../utils/dungeon-geometry'
+  import { getGhostHousingMaterial } from '../../utils/housing-textures'
+  import { isoCameraOccludesPlayer } from '../../utils/iso-occlusion'
   import { passabilityDebugVisible } from '../../stores/debugStore'
   import { pushPassabilityEdges } from '../../utils/passability-wireframe'
 
@@ -40,12 +43,46 @@
   let builtKey = ''
   let entranceKey = ''
 
+  // ── Up-shaft occlusion fade ──────────────────────────────
+  // The staircase you arrive by occludes the player from the iso camera when
+  // they walk behind it; fade it to a ghost material (like trees/houses).
+  interface GhostMesh {
+    mesh: THREE.Mesh
+    base: THREE.Material
+    ghost: THREE.Material
+  }
+  let upShaftMeshes: GhostMesh[] = []
+  let upShaftAABB: THREE.Box3 | null = null
+  let upShaftOccluded = false
+  /** Ray inside the AABB before it counts as occluding (matches housing). */
+  const MIN_OCCLUSION_DEPTH = 0.3
+
   function clearGroup() {
     if (currentGroup) {
       root.remove(currentGroup)
       disposeDungeonGroup(currentGroup)
       currentGroup = null
     }
+    upShaftMeshes = []
+    upShaftAABB = null
+    upShaftOccluded = false
+  }
+
+  /** Cache the up-shaft sub-group's meshes + world AABB for the fade pass.
+   *  `localAABB` is the group-local box from buildDungeonFloorGroup. */
+  function cacheUpShaft(group: THREE.Group, localAABB: THREE.Box3) {
+    const upGroup = group.getObjectByName(UP_SHAFT_GROUP_NAME)
+    if (!upGroup) return
+    upShaftAABB = localAABB.clone().translate(group.position)
+    upGroup.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh)) return
+      const idx = obj.userData.textureIndex as number
+      upShaftMeshes.push({
+        mesh: obj,
+        base: obj.material as THREE.Material,
+        ghost: getGhostHousingMaterial(idx),
+      })
+    })
   }
 
   function clearEntranceGroup() {
@@ -163,19 +200,21 @@
     const layout = dungeonManager.layoutAt(depth)
     if (!layout) return
     const c = dungeonManager.consts
-    currentGroup = buildDungeonFloorGroup(layout, {
+    const built = buildDungeonFloorGroup(layout, {
       grid: c.grid,
       wallHeight: c.wallHeight,
       floorHeight: c.floorHeight,
       shaftW: c.shaftW,
       shaftLen: c.shaftLen,
     })
+    currentGroup = built.group
     currentGroup.position.set(
       dungeonManager.originX,
       dungeonManager.floorY(depth),
       dungeonManager.originZ
     )
     root.add(currentGroup)
+    cacheUpShaft(currentGroup, built.upShaftAABB)
   })
 
   onDestroy(() => {
@@ -186,10 +225,27 @@
   })
 
   /** Per-frame: stair-shaft floor transitions + chest proximity. */
-  export function update(playerX: number, playerZ: number) {
+  export function update(playerX: number, playerY: number, playerZ: number) {
     dungeonManager.updateFromPlayerPosition(playerX, playerZ)
 
     // (The entrance roof has no proximity hide — it's always shown at depth 0.)
+
+    // Fade the up-shaft stairs to a ghost when they occlude the player.
+    if (upShaftAABB && upShaftMeshes.length > 0) {
+      const occ = isoCameraOccludesPlayer(
+        upShaftAABB,
+        playerX,
+        playerY,
+        playerZ,
+        MIN_OCCLUSION_DEPTH
+      )
+      if (occ !== upShaftOccluded) {
+        upShaftOccluded = occ
+        for (const m of upShaftMeshes) {
+          m.mesh.material = occ ? m.ghost : m.base
+        }
+      }
+    }
 
     // Swing both door leaves toward their click-toggled open/shut target
     // (~0.35s either way at 60fps). Driven by dungeonDoorOpen, not proximity.

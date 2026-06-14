@@ -528,7 +528,11 @@
 
       // Dungeon stair-shaft floor transitions
       if (currentPlayer) {
-        dungeonLayerRef?.update(currentPlayer.position.x, currentPlayer.position.z)
+        dungeonLayerRef?.update(
+          currentPlayer.position.x,
+          currentPlayer.position.y,
+          currentPlayer.position.z
+        )
       }
 
       // Update tree occlusion (hide trees that block camera view of player)
