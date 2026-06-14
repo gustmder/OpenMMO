@@ -16,6 +16,7 @@ import {
   dungeon_constants,
   dungeon_add_passability,
   dungeon_remove_passability,
+  dungeon_passability_floor_cells,
 } from '../wasm/onlinerpg_shared'
 import { currentDungeonDepth, currentDungeonId } from '../stores/dungeonStore'
 import { DUNGEON_ENTRANCES } from '../data/dungeonDefs'
@@ -90,6 +91,19 @@ export interface DungeonRect {
   minZ: number
   maxX: number
   maxZ: number
+}
+
+/** One floor's passability edge bits + world placement (debug overlay). */
+export interface DungeonFloorCells {
+  /** World min-corner X (= originX). */
+  originX: number
+  originZ: number
+  width: number
+  depth: number
+  /** World Y of the floor. */
+  yBase: number
+  /** Per-cell edge bitmask (N=1, E=2, S=4, W=8), indexed [gx + gz*width]. */
+  cells: number[]
 }
 
 /**
@@ -171,6 +185,19 @@ class DungeonManager {
   /** Passability floor index for path queries at a given depth. */
   passabilityFloor(depth: number): number {
     return constants().floorIndexBase + depth - 1
+  }
+
+  /**
+   * Debug: per-cell passability edge bits for the registered dungeon's floor
+   * at the given passability floor level (see passabilityFloor). Null when no
+   * dungeon is registered or the level isn't present.
+   */
+  floorPassabilityCells(floorLevel: number): DungeonFloorCells | null {
+    if (!this.id) return null
+    return dungeon_passability_floor_cells(
+      this.id,
+      floorLevel
+    ) as DungeonFloorCells | null
   }
 
   layoutAt(depth: number): DungeonFloorLayout | null {

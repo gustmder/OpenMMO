@@ -38,7 +38,7 @@
   } from './terrain-utils'
   import { playerFloorOffset, playerFloorLevel, playerInsideHouseId } from '../../stores/housingStore'
   import { debugVisible, passabilityDebugVisible } from '../../stores/debugStore'
-  import { EDGE_N, EDGE_E, EDGE_S, EDGE_W } from '../../managers/housing-passability'
+  import { pushPassabilityEdges } from '../../utils/passability-wireframe'
   import { get } from 'svelte/store'
 
   interface Props {
@@ -87,9 +87,6 @@
       }
     }
 
-    const WALL_Y = 0.05 // slightly above floor
-    const WALL_H = 0.1  // line height
-
     for (const [houseId, rp] of housingManager.getPassabilityEntries()) {
       const house = housingManager.getHouseById(houseId)
       if (!house) continue
@@ -97,32 +94,15 @@
       const vertices: number[] = []
 
       for (const floor of rp.floors) {
-        const baseY = floor.yBase
-        const ox = house.origin.x + floor.originX
-        const oz = house.origin.z + floor.originZ
-
-        for (let gz = 0; gz < floor.depth; gz++) {
-          for (let gx = 0; gx < floor.width; gx++) {
-            const bits = floor.cells[gx + gz * floor.width]
-            if (bits === 0) continue
-
-            const cx = ox + gx
-            const cz = oz + gz
-            const y0 = baseY + WALL_Y
-            const y1 = baseY + WALL_Y + WALL_H
-
-            const pushQuad = (x0: number, z0: number, x1: number, z1: number) => {
-              vertices.push(x0, y0, z0, x1, y0, z1) // bottom
-              vertices.push(x0, y1, z0, x1, y1, z1) // top
-              vertices.push(x0, y0, z0, x0, y1, z0) // left vertical
-              vertices.push(x1, y0, z1, x1, y1, z1) // right vertical
-            }
-            if (bits & EDGE_N) pushQuad(cx, cz, cx + 1, cz)
-            if (bits & EDGE_S) pushQuad(cx, cz + 1, cx + 1, cz + 1)
-            if (bits & EDGE_W) pushQuad(cx, cz, cx, cz + 1)
-            if (bits & EDGE_E) pushQuad(cx + 1, cz, cx + 1, cz + 1)
-          }
-        }
+        pushPassabilityEdges(
+          vertices,
+          floor.cells,
+          floor.width,
+          floor.depth,
+          house.origin.x + floor.originX,
+          house.origin.z + floor.originZ,
+          floor.yBase
+        )
       }
 
       if (vertices.length > 0) {

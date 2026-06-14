@@ -312,15 +312,28 @@ pub fn floor_passability_cells(layout: &FloorLayout) -> Vec<u8> {
                 cells[(x + z * GRID) as usize] |= bit;
             }
         };
+        // Skip the deep (lower) landing's run cell: it sits at floor level
+        // inside the room that wraps the shaft, so the arriving player steps
+        // sideways off the stairs there. Walling it (like the steps above)
+        // would trap them at the bottom. The shallow end and all steps stay
+        // walled so descending players can't step into a flush room mid-run.
         if shaft.along_z {
+            let exit_z = if shaft.reversed { r.z } else { r.z + r.d - 1 };
             for z in r.z..r.z + r.d {
+                if z == exit_z {
+                    continue;
+                }
                 set(&mut cells, r.x, z, EDGE_W);
                 set(&mut cells, r.x - 1, z, EDGE_E);
                 set(&mut cells, r.x + r.w - 1, z, EDGE_E);
                 set(&mut cells, r.x + r.w, z, EDGE_W);
             }
         } else {
+            let exit_x = if shaft.reversed { r.x } else { r.x + r.w - 1 };
             for x in r.x..r.x + r.w {
+                if x == exit_x {
+                    continue;
+                }
                 set(&mut cells, x, r.z, EDGE_N);
                 set(&mut cells, x, r.z - 1, EDGE_S);
                 set(&mut cells, x, r.z + r.d - 1, EDGE_S);

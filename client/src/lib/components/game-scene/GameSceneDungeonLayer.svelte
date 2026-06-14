@@ -20,6 +20,8 @@
     buildDungeonFloorGroup,
     disposeDungeonGroup,
   } from '../../utils/dungeon-geometry'
+  import { passabilityDebugVisible } from '../../stores/debugStore'
+  import { pushPassabilityEdges } from '../../utils/passability-wireframe'
 
   /** Walk-up-to-open range for the treasure chest (matches the server). */
   const CHEST_OPEN_RANGE = 1.8
@@ -46,6 +48,61 @@
       entranceGroup = null
     }
   }
+
+  // ── Passability debug overlay (red wireframe on blocked cell edges) ──
+  // Shares the `__togglePassability` toggle with the housing overlay so one
+  // command shows blocked edges everywhere. Draws the floor whose shaft the
+  // player is on (the entry shaft lives in floor 1, hence Math.max(1, depth)).
+  const debugPassGroup = new THREE.Group()
+  debugPassGroup.name = 'dungeonPassabilityDebug'
+  debugPassGroup.visible = false
+  root.add(debugPassGroup)
+  const debugLineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 })
+
+  function clearDebugPass() {
+    while (debugPassGroup.children.length > 0) {
+      const child = debugPassGroup.children[0]
+      debugPassGroup.remove(child)
+      if (child instanceof THREE.LineSegments) child.geometry.dispose()
+    }
+  }
+
+  function rebuildDebugPass() {
+    clearDebugPass()
+    if (!debugPassGroup.visible || !dungeonManager.active) return
+    const floorLevel = dungeonManager.passabilityFloor(
+      Math.max(1, $currentDungeonDepth)
+    )
+    const f = dungeonManager.floorPassabilityCells(floorLevel)
+    if (!f) return
+
+    const verts: number[] = []
+    pushPassabilityEdges(
+      verts,
+      f.cells,
+      f.width,
+      f.depth,
+      f.originX,
+      f.originZ,
+      f.yBase
+    )
+    if (verts.length > 0) {
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+      const lines = new THREE.LineSegments(geo, debugLineMaterial)
+      lines.frustumCulled = false
+      debugPassGroup.add(lines)
+    }
+  }
+
+  // Toggle + re-draw on dungeon/depth change. rebuildDebugPass early-outs
+  // when hidden, so this is free while the overlay is off.
+  $effect(() => {
+    debugPassGroup.visible = $passabilityDebugVisible
+    void $currentDungeonId
+    void $currentDungeonDepth
+    rebuildDebugPass()
+  })
 
   // Surface entrance structure (descending stairs + pit walls). The geometry
   // depends only on the dungeon id, so it's built once per dungeon and only
@@ -110,6 +167,8 @@
   onDestroy(() => {
     clearGroup()
     clearEntranceGroup()
+    clearDebugPass()
+    debugLineMaterial.dispose()
   })
 
   /** Per-frame: stair-shaft floor transitions + chest proximity. */

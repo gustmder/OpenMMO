@@ -245,6 +245,44 @@ pub fn dungeon_remove_passability(entrance_id: &str) {
     with_cache_mut(|c| c.remove(&crate::dungeon::dungeon_cache_key(entrance_id)));
 }
 
+/// Debug: dump one floor's per-cell edge bitmask (N=1, E=2, S=4, W=8) plus
+/// its world min-corner origin and Y, so the client can draw a passability
+/// wireframe. Returns null when the dungeon isn't registered or the floor
+/// level isn't present.
+#[wasm_bindgen]
+pub fn dungeon_passability_floor_cells(
+    entrance_id: &str,
+    floor_level: u8,
+) -> Result<JsValue, JsError> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FloorCellsJs {
+        origin_x: f32,
+        origin_z: f32,
+        width: u8,
+        depth: u8,
+        y_base: f32,
+        cells: Vec<u8>,
+    }
+    with_cache(|c| {
+        let key = crate::dungeon::dungeon_cache_key(entrance_id);
+        let Some(rp) = c.get(&key) else {
+            return Ok(JsValue::NULL);
+        };
+        let Some(f) = rp.floors.iter().find(|f| f.floor_level == floor_level) else {
+            return Ok(JsValue::NULL);
+        };
+        to_js(&FloorCellsJs {
+            origin_x: rp.house_origin_x + f.origin_x as f32,
+            origin_z: rp.house_origin_z + f.origin_z as f32,
+            width: f.width,
+            depth: f.depth,
+            y_base: f.y_base,
+            cells: f.cells.clone(),
+        })
+    })
+}
+
 /// `passability_find_path` with an explicit node budget — dungeon floors
 /// are mazes and cross-floor routes can exhaust the housing default.
 #[wasm_bindgen]
