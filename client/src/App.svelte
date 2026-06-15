@@ -36,6 +36,10 @@
     isPlayerDead && deathUiState === 'dialog_closed'
   )
   let wasPlayerDead = false
+  // Whether we've seen the current player alive this game session. Used to
+  // tell a live death (alive→dead, play the dying animation first) apart from
+  // reconnecting/reloading while already dead (show the dialog at once).
+  let hasObservedCurrentPlayerAlive = false
   let isCurrentPlayerLoading = $state(false)
   let isSceneCompiling = $state(true)
   let kickedMessage = $state('')
@@ -115,6 +119,12 @@
   ): Promise<{ ok: boolean; message?: string }> {
     const result = await networkManager.requestEnterGame(characterId)
     if (result.ok) {
+      // Fresh death tracking for the new session so an already-dead character
+      // (entered while dead) opens the respawn dialog immediately.
+      deathUiState = 'alive'
+      isPlayerDead = false
+      wasPlayerDead = false
+      hasObservedCurrentPlayerAlive = false
       isSceneCompiling = true
       screen = 'game'
     }
@@ -202,15 +212,27 @@
     currentPlayerMaxHp = state.currentPlayer?.maxHealth ?? null
     currentPlayerLevel = state.currentPlayer?.level ?? null
     currentPlayerTotalXp = state.currentPlayer?.totalXp ?? null
-    const deadNow =
-      screen === 'game' &&
-      !!state.currentPlayer &&
-      state.currentPlayer.health <= 0
+  })
+
+  // Drive the death UI from a reactive effect (not the store subscription) so
+  // it re-evaluates when `screen` flips to 'game' as well: on a reload while
+  // dead, JoinSuccess sets health=0 before the screen switches, and there may
+  // be no later store update for a subscription to react to.
+  $effect(() => {
+    const hp = currentPlayerHp
+    const inGame = screen === 'game'
+    const deadNow = inGame && hp !== null && hp <= 0
     if (deadNow && !wasPlayerDead) {
-      deathUiState = 'waiting_dying'
+      // First sighting already dead (reconnected/reloaded while dead): open the
+      // respawn dialog right away. A live alive→dead transition still plays the
+      // dying animation before the dialog opens.
+      deathUiState = hasObservedCurrentPlayerAlive ? 'waiting_dying' : 'dialog_open'
     }
     if (!deadNow) {
       deathUiState = 'alive'
+    }
+    if (inGame && hp !== null && hp > 0) {
+      hasObservedCurrentPlayerAlive = true
     }
     isPlayerDead = deadNow
     wasPlayerDead = deadNow
