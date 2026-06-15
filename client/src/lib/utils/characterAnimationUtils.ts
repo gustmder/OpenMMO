@@ -81,6 +81,64 @@ export function createCharacterModelRoot(sourceScene: THREE.Object3D): {
   return { clonedScene, modelRoot }
 }
 
+const FOOT_BONE_PATTERN = /foot|toe/i
+/** A vertex counts as "on the sole" once foot/toe bones own a majority of it. */
+const FOOT_INFLUENCE_THRESHOLD = 0.5
+/** Tiny gap (m) kept between the soles and the floor so the contact shadow
+ *  doesn't peter-pan where coplanar with the ground. */
+const FOOT_GROUND_CLEARANCE = 0.005
+
+/**
+ * Y offset (metres) to add to a freshly-cloned model so its shoe soles rest
+ * just above the floor plane (y = 0 at the model-root origin), with a hair of
+ * ground clearance. Measured in the skeleton's current pose, so callers MUST
+ * call this right after createCharacterModelRoot — i.e. in the deterministic
+ * bind/rest pose, where both soles are planted — before any animation is
+ * played. This replaces sampling an arbitrary first animation frame, which
+ * (with a randomly-picked idle clip) produced a different lift every session
+ * and left the character floating on flat ground.
+ *
+ * Only foot/toe-skinned vertices are considered, so skirts, capes and
+ * not-yet-attached weapons can't pull the contact point below the soles.
+ * Returns 0 when the model has no skinned foot geometry (left unshifted).
+ */
+export function computeSoleGroundOffset(modelRoot: THREE.Object3D): number {
+  modelRoot.updateMatrixWorld(true)
+  let lowest = Infinity
+  const v = new THREE.Vector3()
+
+  modelRoot.traverse((child) => {
+    if (!(child instanceof THREE.SkinnedMesh) || !child.skeleton) return
+
+    const footBones = new Set<number>()
+    child.skeleton.bones.forEach((bone, i) => {
+      if (FOOT_BONE_PATTERN.test(bone.name)) footBones.add(i)
+    })
+    if (footBones.size === 0) return
+
+    const position = child.geometry.getAttribute('position')
+    const skinIndex = child.geometry.getAttribute('skinIndex')
+    const skinWeight = child.geometry.getAttribute('skinWeight')
+    if (!position || !skinIndex || !skinWeight) return
+
+    for (let i = 0; i < position.count; i++) {
+      let footInfluence = 0
+      for (let k = 0; k < 4; k++) {
+        if (footBones.has(skinIndex.getComponent(i, k))) {
+          footInfluence += skinWeight.getComponent(i, k)
+        }
+      }
+      if (footInfluence < FOOT_INFLUENCE_THRESHOLD) continue
+      v.fromBufferAttribute(position, i)
+      child.applyBoneTransform(i, v) // bind-pose skinned position, mesh-local
+      child.localToWorld(v) // → model-root space (root is at origin here)
+      if (v.y < lowest) lowest = v.y
+    }
+  })
+
+  return Number.isFinite(lowest) ? -lowest + FOOT_GROUND_CLEARANCE : 0
+}
+
 function findPrimarySkinnedMesh(
   root: THREE.Object3D
 ): THREE.SkinnedMesh | null {
