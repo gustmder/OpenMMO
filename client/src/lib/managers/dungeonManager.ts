@@ -339,7 +339,47 @@ class DungeonManager {
     const t = this.shaftRunPos(layout.upShaft, x, z)
     if (t === null) return null
     if (t >= constants().shaftLen - 1) return null
+    return this.midUpShaftFloor(depth)
+  }
+
+  /**
+   * Floor key for an intermediate up-shaft step at `depth`: the shallower
+   * connected floor (surface=0 for the entrance shaft), which is how the shared
+   * stairwell model keys a shaft's middle cells.
+   */
+  private midUpShaftFloor(depth: number): number {
     return depth === 1 ? 0 : this.passabilityFloor(depth - 1)
+  }
+
+  /**
+   * A* floor for a click target on one of the rendered stair shafts at `depth`.
+   * Stairwell intermediate cells are keyed to the shallower connected floor;
+   * only the exit landing belongs to the deeper floor. Using the raw closest
+   * y-base can misclassify a down-shaft click near the middle as the deeper
+   * floor, even though A* can only reach that mid-step under the shallower key.
+   */
+  shaftPathfindingFloorAt(x: number, z: number, depth: number): number | null {
+    const layout = this.layoutAt(depth)
+    if (!layout) return null
+    const len = constants().shaftLen
+
+    const tUp = this.shaftRunPos(layout.upShaft, x, z)
+    if (tUp !== null) {
+      return tUp >= len - 1
+        ? this.passabilityFloor(depth)
+        : this.midUpShaftFloor(depth)
+    }
+
+    if (layout.downShaft) {
+      const tDown = this.shaftRunPos(layout.downShaft, x, z)
+      if (tDown !== null) {
+        return tDown >= len - 1
+          ? this.passabilityFloor(depth + 1)
+          : this.passabilityFloor(depth)
+      }
+    }
+
+    return null
   }
 
   /**

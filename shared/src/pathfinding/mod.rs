@@ -409,6 +409,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn same_floor_query_can_target_stairwell_interior() {
+        let (id, rp) = make_two_floor_stairwell();
+        let mut cache = PassabilityCache::new();
+        cache.insert(id, rp);
+
+        // A player on the floor-0 landing clicks the middle of the stair run.
+        // The mid-step is also keyed to floor 0, but it is only reachable via
+        // the stair-axis expansion; regular same-floor movement treats it as
+        // stairwell interior and blocks entry from the room grid.
+        let result = find_path(2.5, 0.5, 0, 0.5, 1.5, 0, &cache, 500);
+        assert!(result.found, "landing-to-mid-stair click should path");
+        let last = result.waypoints.last().expect("path should have waypoints");
+        assert!(
+            (last.x - 0.5).abs() < 0.01 && (last.z - 1.5).abs() < 0.01,
+            "path should end on the clicked stair step: {:?}",
+            result.waypoints
+        );
+    }
+
     /// Reproduces the dungeon entrance-shaft bug: a player standing on an
     /// *intermediate* stairwell cell clicks a cell on the connected floor.
     /// The shaft's intermediate cells are keyed to the lower floor (0), so the

@@ -116,9 +116,17 @@ class InputHandler {
   private _hoverRaycaster = new Raycaster()
   private readonly _hoverNDC = new Vector2()
   private readonly _hoverWorldPos = new THREE.Vector3()
+  private readonly _fallbackGroundPlane = new THREE.Plane()
+  private readonly _fallbackGroundPoint = new THREE.Vector3()
+  private readonly _fallbackGroundNormal = new THREE.Vector3(0, 1, 0)
 
   get hasKeysPressed(): boolean {
     return this.keysPressed.size > 0
+  }
+
+  clearTransientInput() {
+    this.keysPressed.clear()
+    this._interactJustPressed = false
   }
 
   /** Returns true once per E key press, then resets. */
@@ -399,10 +407,11 @@ class InputHandler {
       }
     }
 
-    // Check intersection with ground meshes
-    if (context.groundMeshes.length === 0) {
-      return { type: 'none' }
-    }
+    // Check intersection with ground meshes. During floor/scene transitions
+    // (notably dungeon death -> surface respawn), the control layer can be
+    // mounted before the visible ground mesh list has caught up. Fall back to
+    // the player's current horizontal plane so a valid canvas click still
+    // becomes a move request instead of silently producing `none`.
     const intersects = raycaster.intersectObjects(context.groundMeshes, true)
 
     if (intersects.length > 0) {
@@ -413,6 +422,26 @@ class InputHandler {
           x: firstHit.point.x,
           y: firstHit.point.y,
           z: firstHit.point.z,
+        },
+      }
+    }
+
+    this._fallbackGroundPlane.set(
+      this._fallbackGroundNormal,
+      -context.playerPosition.y
+    )
+    if (
+      raycaster.ray.intersectPlane(
+        this._fallbackGroundPlane,
+        this._fallbackGroundPoint
+      )
+    ) {
+      return {
+        type: 'move_to_ground',
+        position: {
+          x: this._fallbackGroundPoint.x,
+          y: this._fallbackGroundPoint.y,
+          z: this._fallbackGroundPoint.z,
         },
       }
     }
@@ -507,7 +536,7 @@ class InputHandler {
 
     // OS shortcuts (e.g. Win+Shift+S) can swallow keyup of held modifiers,
     // leaving keys "stuck" and blocking click-to-move via hasKeysPressed.
-    const onWindowBlur = () => this.keysPressed.clear()
+    const onWindowBlur = () => this.clearTransientInput()
 
     document.addEventListener('keydown', onKeyDown)
     document.addEventListener('keyup', onKeyUp)

@@ -77,18 +77,6 @@ pub fn find_path(
         };
     }
 
-    // Confine the search to a single floor when start and goal share it: a
-    // same-floor goal is always reachable without leaving the floor, so the
-    // stairwell is never a legitimate shortcut. This keeps dungeon monsters —
-    // which always query their own `path_floor` for both ends — from wandering
-    // (or chasing) down the stairs onto a floor they don't belong to, where
-    // they'd render at the wrong floor's height and clip through walls. Cross-
-    // floor navigation (the player descending via click-to-move) passes
-    // differing floors and still traverses stairwells. The stairwell *interior*
-    // stays blocked either way (see `is_stair_interior` below), so confinement
-    // doesn't let a monster step into the open shaft.
-    let confine_to_floor = start_floor == goal_floor;
-
     let stair_cells = build_stair_cells(cache);
 
     // Build set of (x, z, real_floor) for stairwell cells.
@@ -98,6 +86,19 @@ pub fn find_path(
     for &(x, z, fk) in stair_cells.keys() {
         stair_positions.insert((x, z, key_to_floor(fk)));
     }
+
+    // Confine the search to a single floor when start and goal share it: a
+    // same-floor room goal is always reachable without leaving the floor, so the
+    // stairwell is never a legitimate shortcut. The exception is a click whose
+    // target is the stairwell itself. Intermediate stair cells are keyed to the
+    // shallower connected floor, so a landing→mid-stair click may have equal
+    // start/goal floor numbers but still needs stair-axis expansion.
+    let start_regular_key = (sx, sz, floor_to_key(start_floor));
+    let start_is_stair_interior = stair_positions.contains(&(sx, sz, start_floor))
+        && !stair_cells.contains_key(&start_regular_key);
+    let goal_is_stair_position = stair_positions.contains(&(gx, gz, goal_floor));
+    let confine_to_floor =
+        start_floor == goal_floor && !start_is_stair_interior && !goal_is_stair_position;
 
     let start_fk = floor_to_key(start_floor);
 

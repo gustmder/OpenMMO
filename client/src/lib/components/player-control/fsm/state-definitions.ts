@@ -191,26 +191,17 @@ export function createFramePhaseStateOverrides({
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Network event overrides (respawn / interaction rejected)
+// Network event overrides (interaction rejected)
 // ───────────────────────────────────────────────────────────────────────────
 
 export interface NetworkEventStateActions {
-  onRespawned: () => void
   onInteractionRejected: () => void
 }
 
 export function createNetworkEventStateOverrides({
-  onRespawned,
   onInteractionRejected,
 }: NetworkEventStateActions): PlayerControlStateOverrides {
   return {
-    dead: {
-      handleEvent: (event) => {
-        if (event.type !== 'network_respawned') return
-        onRespawned()
-        return true
-      },
-    },
     object_interacting: {
       handleEvent: (event) => {
         if (event.type !== 'network_interaction_rejected') return

@@ -10,7 +10,6 @@ export type PlayerControlEvent =
     }
   | { type: 'anim_interaction_finished' }
   | { type: 'anim_pickup_grab' }
-  | { type: 'network_respawned' }
   | { type: 'network_interaction_rejected' }
 
 export interface PlayerControlUpdateOptions {

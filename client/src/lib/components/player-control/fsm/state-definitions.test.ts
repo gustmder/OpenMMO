@@ -164,23 +164,9 @@ describe('createFramePhaseStateOverrides', () => {
 })
 
 describe('createNetworkEventStateOverrides', () => {
-  it('routes respawn events through the dead state', () => {
-    const onRespawned = vi.fn()
-    const overrides = createNetworkEventStateOverrides({
-      onRespawned,
-      onInteractionRejected: vi.fn(),
-    })
-
-    expect(overrides.dead?.handleEvent?.({ type: 'network_respawned' })).toBe(
-      true
-    )
-    expect(onRespawned).toHaveBeenCalledOnce()
-  })
-
   it('routes interaction rejection through the object interaction state', () => {
     const onInteractionRejected = vi.fn()
     const overrides = createNetworkEventStateOverrides({
-      onRespawned: vi.fn(),
       onInteractionRejected,
     })
 
@@ -194,7 +180,6 @@ describe('createNetworkEventStateOverrides', () => {
 
   it('does not consume unrelated network events', () => {
     const overrides = createNetworkEventStateOverrides({
-      onRespawned: vi.fn(),
       onInteractionRejected: vi.fn(),
     })
 
@@ -202,7 +187,7 @@ describe('createNetworkEventStateOverrides', () => {
       overrides.dead?.handleEvent?.({ type: 'network_interaction_rejected' })
     ).toBeUndefined()
     expect(
-      overrides.object_interacting?.handleEvent?.({ type: 'network_respawned' })
+      overrides.object_interacting?.handleEvent?.({ type: 'anim_pickup_grab' })
     ).toBeUndefined()
   })
 })
@@ -226,7 +211,6 @@ describe('createLocalPlayerControlStateDefinitions', () => {
       onInteractionFinished: vi.fn(),
       onPickupGrab: vi.fn(),
       clearJumpFeedbackTimer: vi.fn(),
-      onRespawned: vi.fn(),
       onInteractionRejected: vi.fn(),
       handleInteractKey: vi.fn(),
       handleKeyboard: vi.fn(),
@@ -237,12 +221,16 @@ describe('createLocalPlayerControlStateDefinitions', () => {
     expect(states.picking_up.handleEvent?.({ type: 'anim_pickup_grab' })).toBe(
       true
     )
-    expect(states.dead.handleEvent?.({ type: 'network_respawned' })).toBe(true)
+    expect(
+      states.object_interacting.handleEvent?.({
+        type: 'network_interaction_rejected',
+      })
+    ).toBe(true)
     expect(states.jump_feedback.exit).toBeDefined()
     expect(states.moving.tick?.(16)).toBe(true)
 
     expect(actions.onPickupGrab).toHaveBeenCalledOnce()
-    expect(actions.onRespawned).toHaveBeenCalledOnce()
+    expect(actions.onInteractionRejected).toHaveBeenCalledOnce()
     expect(actions.tick).toHaveBeenCalledWith(16)
   })
 
@@ -251,7 +239,6 @@ describe('createLocalPlayerControlStateDefinitions', () => {
       onInteractionFinished: vi.fn(),
       onPickupGrab: vi.fn(),
       clearJumpFeedbackTimer: vi.fn(),
-      onRespawned: vi.fn(),
       onInteractionRejected: vi.fn(),
       handleInteractKey: vi.fn(),
       handleKeyboard: vi.fn(),
@@ -277,7 +264,6 @@ describe('createLocalPlayerControlMachine', () => {
         onInteractionFinished: vi.fn(),
         onPickupGrab,
         clearJumpFeedbackTimer: vi.fn(),
-        onRespawned: vi.fn(),
         onInteractionRejected: vi.fn(),
         handleInteractKey: vi.fn(),
         handleKeyboard: vi.fn(),

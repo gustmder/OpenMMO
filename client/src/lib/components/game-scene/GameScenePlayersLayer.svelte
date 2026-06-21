@@ -187,7 +187,7 @@
   }
 </script>
 
-{#if camera && terrainMeshes.some((mesh) => mesh !== undefined)}
+{#if camera && currentPlayer}
   <PlayerControl
     bind:this={playerControl}
     onStateChange={onStateChange}

@@ -215,6 +215,7 @@ function baseInput() {
     sendPlayerMove: vi.fn(),
     actions: {
       transitionToDead: vi.fn(),
+      transitionToRespawned: vi.fn(),
       resetStoppedSpeed: vi.fn(),
       combat: {
         stopMovingToIdle: vi.fn(),
@@ -245,6 +246,20 @@ describe('runPlayerMovementTick', () => {
     runPlayerMovementTick(input)
 
     expect(input.actions.transitionToDead).toHaveBeenCalledOnce()
+    expect(input.currentPlayer.position.y).toBe(3)
+  })
+
+  it('recovers respawned players if the control state is still dead', () => {
+    const input = {
+      ...baseInput(),
+      playerStateName: 'dead' as const,
+      currentPlayer: { health: 10, position: { x: 0, y: 3, z: 0 } },
+    }
+
+    runPlayerMovementTick(input)
+
+    expect(input.actions.transitionToRespawned).toHaveBeenCalledOnce()
+    expect(input.actions.resetStoppedSpeed).not.toHaveBeenCalled()
     expect(input.currentPlayer.position.y).toBe(3)
   })
 

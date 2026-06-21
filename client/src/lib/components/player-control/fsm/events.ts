@@ -51,7 +51,6 @@ export interface PlayerControlEventActions extends CanvasClickActions {
   ): void
   onInteractionFinished(): void
   onPickupGrab(): void
-  onRespawned(): void
   onInteractionRejected(): void
 }
 
@@ -74,9 +73,6 @@ export function dispatchPlayerControlEvent(
       return
     case 'anim_pickup_grab':
       actions.onPickupGrab()
-      return
-    case 'network_respawned':
-      actions.onRespawned()
       return
     case 'network_interaction_rejected':
       actions.onInteractionRejected()

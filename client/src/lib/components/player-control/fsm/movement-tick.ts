@@ -160,7 +160,7 @@ export function runMovementFrame(input: RunMovementFrameInput) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Per-frame player movement tick (death → terrain → combat → movement)
+// Per-frame player movement tick (death/respawn → terrain → combat → movement)
 // ───────────────────────────────────────────────────────────────────────────
 
 interface MovementTickPlayer {
@@ -206,6 +206,7 @@ interface RunPlayerMovementTickInput {
   sendPlayerMove: (position: Position, rotation: number) => void
   actions: {
     transitionToDead: () => void
+    transitionToRespawned: () => void
     resetStoppedSpeed: () => void
     combat: CombatOutcomeActions
     movement: MovementOutcomeActions
@@ -240,6 +241,10 @@ export function runPlayerMovementTick({
 }: RunPlayerMovementTickInput) {
   if (currentPlayer && currentPlayer.health <= 0) {
     actions.transitionToDead()
+    return
+  }
+  if (currentPlayer && currentPlayer.health > 0 && playerStateName === 'dead') {
+    actions.transitionToRespawned()
     return
   }
 

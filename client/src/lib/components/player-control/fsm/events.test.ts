@@ -87,7 +87,6 @@ function makeActions() {
     requestMove: vi.fn(),
     onInteractionFinished: vi.fn(),
     onPickupGrab: vi.fn(),
-    onRespawned: vi.fn(),
     onInteractionRejected: vi.fn(),
   } satisfies PlayerControlEventActions
 }

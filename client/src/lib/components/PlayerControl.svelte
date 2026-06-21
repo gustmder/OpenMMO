@@ -137,6 +137,12 @@
   const STAND_UP_DURATION = 300 // ms, matches animation crossfade duration
   let standUpTimer: ReturnType<typeof setTimeout> | null = null
 
+  function clearStandUpTimer() {
+    if (!standUpTimer) return
+    clearTimeout(standUpTimer)
+    standUpTimer = null
+  }
+
   const JUMP_FEEDBACK_DURATION_MS = 1500
   const JUMP_FEEDBACK_COOLDOWN_MS = 1000
   let jumpFeedbackTimer: ReturnType<typeof setTimeout> | null = null
@@ -264,10 +270,7 @@
   }
 
   function stopMovement() {
-    if (standUpTimer) {
-      clearTimeout(standUpTimer)
-      standUpTimer = null
-    }
+    clearStandUpTimer()
     currentSpeed = 0
     // Settle into idle BEFORE emitting: the projection derives 'moving' vs
     // 'idle' from the machine's owned state, so the transition must precede the
@@ -420,6 +423,8 @@
     if (transition.kind === 'ignored_already_dead') return
 
     combatController.cancelCombat()
+    inputHandler.clearTransientInput()
+    currentSpeed = transition.runtime.currentSpeed
     // Finish any in-flight pickup while still in picking_up, before the dead
     // transition drops that state (L5: explicit finish on every pickup exit).
     finishPendingPickup()
@@ -437,6 +442,11 @@
       z: currentPlayer.position.z,
     })
     combatController.cancelCombat()
+    inputHandler.clearTransientInput()
+    clearStandUpTimer()
+    clearJumpFeedbackTimer()
+    clearPropSwingTimers()
+    currentSpeed = transition.runtime.currentSpeed
     playerRotation = transition.runtime.playerRotation
     finishPendingPickup()
 
@@ -631,6 +641,7 @@
       sendPlayerMove,
       actions: {
         transitionToDead,
+        transitionToRespawned,
         resetStoppedSpeed: () => {
           currentSpeed = 0
           updatePlayerState()
@@ -676,7 +687,7 @@
       exitObjectAndDelay: () => {
         exitObjectInteraction()
 
-        if (standUpTimer) clearTimeout(standUpTimer)
+        clearStandUpTimer()
         standUpTimer = setTimeout(() => {
           standUpTimer = null
           enqueuePlayerControlEvent({
@@ -733,11 +744,17 @@
    * climbs out instead of routing down to the bottom landing first.
    */
   function getFloorAtForClick(x: number, z: number, y: number): number {
+    const depth = get(currentDungeonDepth)
+    if (depth >= 1) {
+      const shaftFloor = dungeonManager.shaftPathfindingFloorAt(x, z, depth)
+      if (shaftFloor !== null) return shaftFloor
+    }
+
     const floor = passability_get_floor_at(x, z, y)
     const fib = dungeonManager.consts.floorIndexBase
     if (floor < fib) return floor
     const ent = dungeonManager.entrancePos
-    if (!ent) return get(currentDungeonDepth) < 1 ? 0 : floor
+    if (!ent) return depth < 1 ? 0 : floor
     // Target the floor that is currently SHOWN to the player, independent of
     // logical depth: when underground (depth ≥ 1) or anywhere on the entrance
     // shaft (where the floor-1 room is already rendered), a click targets that
@@ -745,7 +762,7 @@
     // routed back out the entrance. Only off the shaft on the open surface do we
     // fall through to the surface-vs-floor Y heuristic below.
     const inDungeonView =
-      get(currentDungeonDepth) >= 1 ||
+      depth >= 1 ||
       (currentPlayer != null &&
         dungeonManager.isOnEntranceShaft(
           currentPlayer.position.x,
@@ -1065,7 +1082,6 @@
       requestMove: handleClickToMove,
       onInteractionFinished,
       onPickupGrab,
-      onRespawned: transitionToRespawned,
       onInteractionRejected: () => {
         if (playerState.state === 'interact') exitObjectInteraction(false)
       },
@@ -1082,7 +1098,6 @@
       onInteractionFinished,
       onPickupGrab,
       clearJumpFeedbackTimer,
-      onRespawned: transitionToRespawned,
       onInteractionRejected: () => {
         if (playerState.state === 'interact') exitObjectInteraction(false)
       },
@@ -1170,7 +1185,7 @@
         !!currentPlayer && currentPlayer.health <= 0,
       isCurrentPlayer: (id) => !!currentPlayer && currentPlayer.id === id,
       isInteracting: () => playerState.state === 'interact',
-      onRespawned: () => enqueuePlayerControlEvent({ type: 'network_respawned' }),
+      onRespawned: transitionToRespawned,
       onInteractionRejected: () =>
         enqueuePlayerControlEvent({ type: 'network_interaction_rejected' }),
     })
@@ -1182,7 +1197,7 @@
       clearHover()
       unsubscribeNetworkEvents()
       playerControlMachine.dispose()
-      if (standUpTimer) clearTimeout(standUpTimer)
+      clearStandUpTimer()
       clearJumpFeedbackTimer()
       clearPropSwingTimers()
     }
