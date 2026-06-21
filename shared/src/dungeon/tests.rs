@@ -318,8 +318,11 @@ fn shaft_opens_to_room_only_at_its_landing() {
 
 #[test]
 fn passability_floor_mapping() {
-    assert_eq!(passability_floor_for_depth(1), 4);
-    assert_eq!(passability_floor_for_depth(MAX_DEPTH), 23);
+    assert_eq!(passability_floor_for_depth(1), DUNGEON_FLOOR_INDEX_BASE);
+    assert_eq!(
+        passability_floor_for_depth(MAX_DEPTH),
+        DUNGEON_FLOOR_INDEX_BASE + MAX_DEPTH - 1
+    );
     assert_eq!(floor_world_y(10.0, 1), 6.0);
     assert_eq!(floor_world_y(10.0, 20), -70.0);
 }

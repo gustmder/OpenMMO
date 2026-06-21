@@ -10,6 +10,8 @@ export const WALL_THICKNESS = 0.1
 export const FLOOR_THICKNESS = 0.1
 export const DEFAULT_WALL_HEIGHT = 3
 export const LANDING_DEPTH = 0.5
+// Keep in sync with shared housing::MAX_FLOOR_LEVEL (the dungeon base derives
+// from the Rust value; only this housing-UI copy needs manual bumping).
 export const MAX_FLOOR_LEVEL = 3
 export const ROOF_OVERHANG = 0.3
 export const FLOOR_OVERHANG_PER_LEVEL = 0.15

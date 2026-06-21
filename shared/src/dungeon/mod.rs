@@ -48,10 +48,12 @@ pub const DUNGEON_FLOOR_HEIGHT: f32 = 4.0;
 /// entrance and never captures players walking on the surface above.
 pub const DUNGEON_WALL_HEIGHT: f32 = 3.0;
 
-/// Passability floor index of depth 1. Housing uses 0..=3; dungeon depths
-/// map to 4..=23 so the two systems can never collide in floor-keyed
-/// collision queries.
-pub const DUNGEON_FLOOR_INDEX_BASE: u8 = 4;
+/// Passability floor index of depth 1. Sits one slot above the housing
+/// range (`0..=housing::MAX_FLOOR_LEVEL`) so the two systems can never
+/// collide in floor-keyed collision queries. Derived from the housing max
+/// so growing housing shifts the dungeon range automatically — this index
+/// is recomputed at runtime and never persisted, so the shift is safe.
+pub const DUNGEON_FLOOR_INDEX_BASE: u8 = crate::housing::MAX_FLOOR_LEVEL + 1;
 
 pub const MIN_DEPTH: u8 = 5;
 pub const MAX_DEPTH: u8 = 20;

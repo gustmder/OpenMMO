@@ -1,13 +1,12 @@
 pub mod routes;
 
-use onlinerpg_shared::housing::{HouseData, RoomData, RoomType};
+use onlinerpg_shared::housing::{HouseData, RoomData, RoomType, MAX_FLOOR_LEVEL};
 use std::path::PathBuf;
 use tokio::fs;
 use tracing::{error, info};
 
 const MIN_ROOM_SIZE: u8 = 3;
 const MAX_ROOM_SIZE: u8 = 6;
-const MAX_FLOOR_LEVEL: u8 = 3;
 
 /// Validate a house before saving. Returns Ok(()) or an error message.
 pub fn validate_house(house: &HouseData, neighbors: &[HouseData]) -> Result<(), String> {

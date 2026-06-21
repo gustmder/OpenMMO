@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::Position;
 
+/// Highest housing floor level (0 = ground floor). Housing thus occupies
+/// passability floor indices `0..=MAX_FLOOR_LEVEL`; dungeon depths start
+/// just above this range (see `dungeon::DUNGEON_FLOOR_INDEX_BASE`), so the
+/// two systems can never collide in floor-keyed collision queries. Raising
+/// this is the single knob that grows housing — the dungeon base follows
+/// automatically.
+pub const MAX_FLOOR_LEVEL: u8 = 3;
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RoomType {
     #[serde(rename = "normal")]
