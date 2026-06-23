@@ -10,9 +10,9 @@
 <div class="respawn-backdrop">
   <div class="respawn-dialog" role="dialog" aria-modal="true">
     <h2>You Died</h2>
-    <p>Would you like to respawn?</p>
+    <p>Would you like to revive?</p>
     <div class="respawn-actions">
-      <button class="primary" onclick={onRespawn}>Respawn</button>
+      <button class="primary" onclick={onRespawn}>Revive</button>
       <button class="secondary" onclick={onLater}>Later</button>
     </div>
   </div>

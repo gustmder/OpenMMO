@@ -92,7 +92,7 @@
   <div class="corner-actions">
     {#if canReopenRespawnDialog}
       <button class="respawn-reopen" onclick={onReopenRespawnDialog}>
-        Respawn
+        Revive
       </button>
     {/if}
     <button class="corner-btn" onclick={() => characterPanelVisible.update(v => !v)} title="Character (C)">

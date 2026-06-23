@@ -590,15 +590,20 @@ export function handleServerMessage(
           serverPlayer.position.x,
           serverPlayer.position.z
         )
+        // Drop the dungeon's monsters we left behind. The server already
+        // despawned/handed them off, but its MonsterRemoved is filtered to
+        // the dungeon floor we just left, so we never get it — purge by
+        // floor to avoid undamageable "ghost" monsters on re-entry.
+        monsterManager.removeMonstersNotOnFloor(serverPlayer.floor_level ?? 0)
         requestCameraReset()
-        addChatMessage({ text: 'You have respawned.', sender: 'system' })
+        addChatMessage({ text: 'You have been revived.', sender: 'system' })
       } else {
         updatePlayer(serverPlayer.id, {
           health: serverPlayer.health,
           maxHealth: serverPlayer.max_health,
         })
         addChatMessage({
-          text: `${serverPlayer.name} has respawned.`,
+          text: `${serverPlayer.name} has been revived.`,
           sender: 'system',
         })
         remotePlayerManager.handleRespawn(
