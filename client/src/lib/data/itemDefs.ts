@@ -27,7 +27,7 @@ export function getItemDef(itemDefId: string): ItemDefinition | undefined {
 }
 
 /** Categories that can be drunk/used from the bag. Extend as potions are added. */
-const CONSUMABLE_CATEGORIES = new Set(['healing_potion'])
+const CONSUMABLE_CATEGORIES = new Set(['healing_potion', 'teleport_scroll'])
 
 export function isConsumable(def: ItemDefinition): boolean {
   return def.category !== undefined && CONSUMABLE_CATEGORIES.has(def.category)

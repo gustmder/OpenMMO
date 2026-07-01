@@ -440,11 +440,7 @@ impl super::GameState {
                 let old_floor = player.floor_level;
                 let old_position = player.position.clone();
                 let spawn = &world_config().spawn_position;
-                player.position = Position {
-                    x: spawn.x,
-                    y: spawn.y,
-                    z: spawn.z,
-                };
+                player.position = spawn.position();
                 player.rotation = spawn.rotation;
                 // Death always returns to the surface — clears dungeon
                 // depths and stale housing floors alike.

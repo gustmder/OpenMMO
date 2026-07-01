@@ -877,7 +877,7 @@ async fn resident_shop_state_reports_wishlist_and_stock() {
         .await;
 
     game_state
-        .open_shop(&"seller".to_string(), "npc_karl")
+        .open_shop(&"seller".to_string(), "npc_karl", true)
         .await;
 
     match seller_rx.try_recv() {

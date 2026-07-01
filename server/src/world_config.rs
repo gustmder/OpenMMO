@@ -47,6 +47,18 @@ pub struct SpawnPosition {
     pub rotation: f32,
 }
 
+impl SpawnPosition {
+    /// The spawn's world position (drops `rotation`, which callers apply
+    /// separately alongside floor level 0).
+    pub fn position(&self) -> crate::types::Position {
+        crate::types::Position {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
+    }
+}
+
 static WORLD_CONFIG: LazyLock<WorldConfig> = LazyLock::new(|| {
     let data = include_str!("../../data-src/world.json");
     serde_json::from_str(data).expect("Failed to parse world.json")

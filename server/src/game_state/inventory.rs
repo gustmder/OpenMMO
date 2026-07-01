@@ -1,5 +1,6 @@
 use crate::auth::AuthService;
 use crate::types::{PlayerId, ServerMessage};
+use crate::world_config::world_config;
 use onlinerpg_shared::inventory::{EquipSlot, GroundItem, ItemInstance, PlayerInventory};
 use rand::Rng;
 use tracing::{info, warn};
@@ -10,6 +11,14 @@ use super::ServerGroundItem;
 const GROUND_ITEM_LIFETIME_MS: u64 = 5 * 60 * 1000;
 
 const MAX_PICKUP_DISTANCE: f32 = 2.5;
+
+/// The effect produced by reading/drinking a usable item via `use_item`.
+enum UseEffect {
+    /// Restore HP by rolling the given dice notation.
+    Heal(String),
+    /// Teleport the user back to the town spawn point.
+    TeleportTown,
+}
 
 /// Serialize a PlayerInventory into the flat row format used by AuthService persistence.
 fn serialize_inventory(inv: &PlayerInventory) -> Vec<(String, u32, Option<String>)> {
@@ -267,12 +276,11 @@ impl super::GameState {
         self.send_inventory_snapshot(player_id, snapshot).await;
     }
 
-    /// Consume a usable item from the bag (e.g. drink a healing potion):
-    /// roll its heal dice, restore HP capped at max, decrement the stack and
-    /// broadcast the new health to nearby players.
+    /// Use a consumable from the bag: resolve its effect and dispatch to the
+    /// matching handler (healing potion, teleport scroll, ...).
     pub async fn use_item(&self, player_id: &PlayerId, instance_id: u64) {
-        // Resolve the item's heal dice before mutating anything.
-        let heal_dice = {
+        // Resolve which usable effect this item carries before mutating anything.
+        let effect = {
             let inventories = self.inventories.read().await;
             let inv = match inventories.get(player_id) {
                 Some(inv) => inv,
@@ -287,12 +295,13 @@ impl super::GameState {
                     return;
                 }
             };
-            match self
-                .item_defs
-                .get(&item.item_def_id)
-                .and_then(|d| d.heal_dice().map(str::to_string))
-            {
-                Some(dice) => dice,
+            let effect = self.item_defs.get(&item.item_def_id).and_then(|def| {
+                def.heal_dice()
+                    .map(|dice| UseEffect::Heal(dice.to_string()))
+                    .or_else(|| def.is_teleport_scroll().then_some(UseEffect::TeleportTown))
+            });
+            match effect {
+                Some(effect) => effect,
                 None => {
                     drop(inventories);
                     self.send_inventory_error(player_id, "This item cannot be used")
@@ -302,8 +311,15 @@ impl super::GameState {
             }
         };
 
-        // Apply healing to the player, capped at max health. Refuse if the
-        // player is defeated or already at full HP (and keep the potion).
+        match effect {
+            UseEffect::Heal(dice) => self.use_healing_item(player_id, instance_id, &dice).await,
+            UseEffect::TeleportTown => self.use_teleport_scroll(player_id, instance_id).await,
+        }
+    }
+
+    /// Drink a healing potion: roll its dice and restore HP up to the cap.
+    /// Refuses (keeping the potion) if the player is defeated or already full.
+    async fn use_healing_item(&self, player_id: &PlayerId, instance_id: u64, heal_dice: &str) {
         let (health, max_health, position, floor_level) = {
             let mut players = self.players.write().await;
             let player = match players.get_mut(player_id) {
@@ -322,7 +338,7 @@ impl super::GameState {
                     .await;
                 return;
             }
-            let amount = crate::game::combat::roll_dice(&heal_dice);
+            let amount = crate::game::combat::roll_dice(heal_dice);
             player.health = (player.health + amount).min(player.max_health);
             (
                 player.health,
@@ -332,7 +348,45 @@ impl super::GameState {
             )
         };
 
-        // Consume one from the stack, removing the instance when it hits zero.
+        self.consume_one_and_sync(player_id, instance_id).await;
+        self.send_direct_message_to_players_within_position(
+            &position,
+            floor_level,
+            super::AGENT_EVENT_DELIVERY_RADIUS,
+            ServerMessage::PlayerHealthUpdate {
+                player_id: player_id.clone(),
+                health,
+                max_health,
+            },
+            None,
+        )
+        .await;
+    }
+
+    /// Read a scroll of teleportation: whisk the reader back to the town spawn
+    /// (surface floor). Refuses while defeated so the dead can't escape death.
+    async fn use_teleport_scroll(&self, player_id: &PlayerId, instance_id: u64) {
+        let defeated = match self.players.read().await.get(player_id) {
+            Some(player) => player.health == 0,
+            None => return,
+        };
+        if defeated {
+            self.send_inventory_error(player_id, "You can't read while defeated")
+                .await;
+            return;
+        }
+
+        self.consume_one_and_sync(player_id, instance_id).await;
+
+        let spawn = &world_config().spawn_position;
+        self.teleport_player(player_id, spawn.position(), spawn.rotation, 0)
+            .await;
+    }
+
+    /// Remove one unit of `instance_id` from the player's bag (dropping the
+    /// instance when the stack empties), persist, and push the fresh snapshot
+    /// to the client.
+    async fn consume_one_and_sync(&self, player_id: &PlayerId, instance_id: u64) {
         let snapshot = {
             let mut inventories = self.inventories.write().await;
             let inv = match inventories.get_mut(player_id) {
@@ -352,18 +406,6 @@ impl super::GameState {
         self.mark_dirty(player_id).await;
         self.mark_inventory_dirty(player_id).await;
         self.send_inventory_snapshot(player_id, snapshot).await;
-        self.send_direct_message_to_players_within_position(
-            &position,
-            floor_level,
-            super::AGENT_EVENT_DELIVERY_RADIUS,
-            ServerMessage::PlayerHealthUpdate {
-                player_id: player_id.clone(),
-                health,
-                max_health,
-            },
-            None,
-        )
-        .await;
     }
 
     /// Insert a ground item into the world and announce it to nearby players.

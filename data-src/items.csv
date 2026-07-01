@@ -18,3 +18,4 @@ torch,Torch,A flickering wooden torch.,1,off_hand,false,torch.png,torch.glb,weap
 spear,Spear,A long wooden-shafted spear tipped with iron.,4,main_hand,false,spear_icon.png,spear.glb,weapon,1d6,metal,3500
 coin_pile,Coin Pile,A small heap of loose copper coins.,0,,false,sword.png,objects/coin_pile_spill.glb,currency,,,
 healing_potion,Healing Potion,A crimson brew that knits wounds and restores vitality.,0.5,,true,healing_potion.png,objects/health_potion.glb,healing_potion,6d4,,500
+scroll_of_teleportation,Scroll of Teleportation,Reading the arcane runes whisks you back to town in a flash of light.,0.2,,true,scroll_of_teleportation.png,objects/scroll.glb,teleport_scroll,,,800

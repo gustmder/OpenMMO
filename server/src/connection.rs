@@ -464,11 +464,7 @@ async fn handle_client_message(
                     .await;
                 if !ok {
                     let spawn = &crate::world_config::world_config().spawn_position;
-                    player.position = Position {
-                        x: spawn.x,
-                        y: spawn.y,
-                        z: spawn.z,
-                    };
+                    player.position = spawn.position();
                     player.rotation = spawn.rotation;
                     player.floor_level = 0;
                 }

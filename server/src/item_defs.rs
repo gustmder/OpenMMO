@@ -56,6 +56,11 @@ impl ItemDefinition {
             None
         }
     }
+
+    /// A read-once scroll that whisks the reader back to the town spawn.
+    pub fn is_teleport_scroll(&self) -> bool {
+        self.category.as_deref() == Some("teleport_scroll")
+    }
 }
 
 #[derive(Debug, Clone)]
