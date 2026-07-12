@@ -74,7 +74,7 @@
     reflectionEnabled,
     housingEditorMode,
   } from '../stores/debugStore'
-  import { editorPanOffset, editorHeightManager, editorSplatManager, editorGrassDataManager, editorTreeDataManager, editorZoneManager, terrainForceRebuild } from '../stores/editorStore'
+  import { editorPanOffset, editorHeightManager, editorSplatManager, editorGrassDataManager, editorTreeDataManager, editorZoneManager, terrainForceRebuild, currentObjectData } from '../stores/editorStore'
   import { ZoneManager } from '../managers/zoneManager'
   import { initFpsCounting, tickFps } from './FPSCounter.svelte'
   import { tickWavePhase } from './WavePhaseDebug.svelte'
@@ -1011,6 +1011,7 @@
     foamMap={waterFoamMap}
     sunDirection={waterSunDir}
     playerPosition={currentPlayer?.position ?? null}
+    objectPlacements={$currentObjectData.placements}
   />
 {/if}
 

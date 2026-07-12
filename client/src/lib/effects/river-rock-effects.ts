@@ -43,6 +43,8 @@ export interface SprayEmitter {
   x: number
   y: number
   z: number
+  /** Optional vertical offset for spray only; wake foam stays on y. */
+  sprayYOffset?: number
   flowX: number
   flowZ: number
   /** Rock half-width (m) — sets the spawn line length. */
@@ -212,7 +214,7 @@ export class RiverSpraySystem {
     const lateral = (Math.random() - 0.5) * 1.6 * e.radius
     p.x = e.x - e.flowX * e.radius * 0.8 + perpX * lateral
     p.z = e.z - e.flowZ * e.radius * 0.8 + perpZ * lateral
-    p.y = e.y + 0.05
+    p.y = e.y + 0.05 + (e.sprayYOffset ?? 0)
     // Up and slightly upstream, sideways scatter; the arc then falls
     // back onto the rock/wake under gravity.
     p.vx =
