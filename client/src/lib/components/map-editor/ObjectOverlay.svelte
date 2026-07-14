@@ -29,6 +29,7 @@
   } from '../../stores/housingStore'
   import { housingManager } from '../../managers/housingManager'
   import { loadGLB } from '../../utils/gltfCache'
+  import { getObjectModelPath } from '../../utils/modelPaths'
   import { buildShopSignBoard, buildShopSignText } from '../../utils/shop-sign'
   import type { Unsubscriber } from 'svelte/store'
   import { SvelteMap, SvelteSet } from 'svelte/reactivity'
@@ -159,7 +160,8 @@
         await Promise.resolve()
         model = buildProceduralModel(def.procedural)
       } else {
-        const gltf = await loadGLB(`/models/objects/${def.model}`)
+        if (!def.model) return null
+        const gltf = await loadGLB(getObjectModelPath(def.model))
         // Bridges ray-cast against the cached, untransformed scene at runtime
         // so the player Y tracks the actual deck curve precisely.
         if (def.kind === 'bridge') {
@@ -182,7 +184,10 @@
       box.getSize(size)
       modelBounds.set(objectId, { center, size })
       modelCache.set(objectId, model)
+      // Force a full rebuild (not the transform-only fast path) so the newly
+      // loaded template actually gets cloned into the scene.
       lastBuildKey = ''
+      lastStructKey = ''
       rebuild()
       // If the user is currently previewing this object, build the preview now —
       // otherwise the cursor stays empty until the mouse moves again.
@@ -246,25 +251,64 @@
   }
 
   let lastBuildKey = ''
+  let lastStructKey = ''
+  /** objectId → its placement clone in `group`, so the transform-only fast path
+   *  can move an existing clone instead of tearing the whole region down. */
+  const cloneById = new SvelteMap<number, THREE.Object3D>()
   const isEditing = () => isEditorMode && tool === 'object'
 
-  function buildKey(p: ObjectPlacement[]): string {
-    return p
-      .map(
-        (v) =>
-          `${v.id}:${v.type}:${v.x}:${v.y}:${v.z}:${v.rotation}:${v.text ?? ''}`
-      )
-      .join('|')
+  /** Apply a placement's position + rotation (yaw + pitch) to its clone. Single
+   *  source of transform threading for both the full rebuild and fast path. */
+  function applyPlacementTransform(clone: THREE.Object3D, p: ObjectPlacement) {
+    clone.position.set(p.x, p.y, p.z)
+    clone.rotation.set(
+      ((p.rotationX ?? 0) * Math.PI) / 180,
+      (p.rotation * Math.PI) / 180,
+      0
+    )
+  }
+
+  /** Placements currently shown, after floor + house filtering. */
+  function visiblePlacements(visibleFloor: number): ObjectPlacement[] {
+    return placements.filter((p) => {
+      if (p.floorLevel !== visibleFloor) return false
+      const pHouse = housingManager.findHouseAtPoint(p.x, p.y, p.z)
+      return currentHouseId ? pHouse?.id === currentHouseId : pHouse == null
+    })
   }
 
   function rebuild() {
     const visibleFloor = Math.max(0, currentFloor)
-    const key =
-      buildKey(placements) +
+    const visible = visiblePlacements(visibleFloor)
+    // Split the change signature: `structKey` is everything that changes WHICH
+    // clones exist (id/type/text set, selection, floor, house); `transformKey`
+    // is just each clone's position/rotation. When only transforms changed we
+    // move the existing clones in place instead of teardown + re-clone — crucial
+    // on WebGPU, where re-instantiating meshes/materials rebuilds pipelines and
+    // bind groups and tanks FPS during a slider/wheel drag.
+    const structKey =
+      visible.map((p) => `${p.id}:${p.type}:${p.text ?? ''}`).join('|') +
       `|sel:${isEditing() ? selectedId : ''}|fl:${visibleFloor}|h:${currentHouseId ?? ''}`
+    const transformKey = visible
+      .map(
+        (p) => `${p.id}:${p.x}:${p.y}:${p.z}:${p.rotation}:${p.rotationX ?? 0}`
+      )
+      .join('|')
+    const key = structKey + '||' + transformKey
     if (key === lastBuildKey) return
+    const structUnchanged = structKey === lastStructKey && lastStructKey !== ''
     lastBuildKey = key
+    lastStructKey = structKey
 
+    if (structUnchanged) {
+      for (const p of visible) {
+        const clone = cloneById.get(p.id)
+        if (clone) applyPlacementTransform(clone, p)
+      }
+      return
+    }
+
+    cloneById.clear()
     for (let i = group.children.length - 1; i >= 0; i--) {
       const child = group.children[i]
       if (child !== previewGroup) {
@@ -273,22 +317,14 @@
       }
     }
 
-    for (const p of placements) {
-      if (p.floorLevel !== visibleFloor) continue
-      const pHouse = housingManager.findHouseAtPoint(p.x, p.y, p.z)
-      if (currentHouseId) {
-        if (pHouse?.id !== currentHouseId) continue
-      } else {
-        if (pHouse != null) continue
-      }
+    for (const p of visible) {
       const template = modelCache.get(p.type)
       if (!template) {
         getModel(p.type)
         continue
       }
       const clone = template.clone()
-      clone.position.set(p.x, p.y, p.z)
-      clone.rotation.y = (p.rotation * Math.PI) / 180
+      applyPlacementTransform(clone, p)
       if (isEditing() && p.id === selectedId) {
         const bounds = modelBounds.get(p.type)
         if (bounds) {
@@ -323,6 +359,7 @@
           }
         })
       }
+      cloneById.set(p.id, clone)
       group.add(clone)
     }
     // Fresh clones start opaque; the $effect will re-apply ghost next frame

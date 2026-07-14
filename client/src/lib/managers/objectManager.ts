@@ -7,6 +7,7 @@ import type {
 import { TERRAIN_TILE_SIZE } from '../components/game-scene/terrain-utils'
 import { tileToRegion } from '../terrain/terrain-constants'
 import { loadGLB } from '../utils/gltfCache'
+import { getObjectModelPath } from '../utils/modelPaths'
 import { detectFootprint, type FootprintData } from '../utils/objectFootprint'
 
 function regionKey(rx: number, rz: number): string {
@@ -37,7 +38,7 @@ export class ObjectManager {
     await this.fetchCatalog()
     const def = this.getCatalogEntry(objectType)
     if (!def || !def.model) return null
-    const gltf = await loadGLB(`/models/objects/${def.model}`)
+    const gltf = await loadGLB(getObjectModelPath(def.model))
     const data = detectFootprint(gltf.scene)
     this.footprintCache.set(objectType, data)
     return data

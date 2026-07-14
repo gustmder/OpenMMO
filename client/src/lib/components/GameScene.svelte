@@ -1196,6 +1196,7 @@
     heightManager={terrainHeightManager}
     splatManager={terrainSplatManager}
     grassDataManager={terrainGrassDataManager}
+    getObjectGroup={() => objectOverlayRef?.getGroup() ?? null}
   />
   <ZoneOverlay />
   <RoadOverlay />

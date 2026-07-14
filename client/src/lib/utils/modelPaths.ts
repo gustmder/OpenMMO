@@ -30,6 +30,14 @@ export function getWeaponModelPath(worldModel: string): string {
   return `/models/${worldModel}`
 }
 
+/** URL for an object-catalog GLB. `model` is the catalog `ObjectDef.model`,
+ *  already relative to /models/ (e.g. "objects/bed.glb", "weapons/sword.glb").
+ *  All object-model loaders route through here so the base path lives in one
+ *  place. */
+export function getObjectModelPath(model: string): string {
+  return `/models/${model}`
+}
+
 const CLASS_GENDER_MODELS: Partial<
   Record<CharacterClass, Partial<Record<Gender, string>>>
 > = {
@@ -84,8 +92,8 @@ export function getDefaultWeaponModel(
     case 'merchant':
       return null
     case 'guard':
-      return 'spear.glb'
+      return 'weapons/spear.glb'
     default:
-      return 'sword.glb'
+      return 'weapons/sword.glb'
   }
 }

@@ -44,11 +44,14 @@
   let floor = $state(-1)
   /** Anchors slider range so it doesn't drift while dragging. */
   let baseY = $state<number | null>(null)
+  let baseX = $state<number | null>(null)
+  let baseZ = $state<number | null>(null)
   let heightManager = $state<TerrainHeightManager | null>(null)
   let grassManager = $state<TerrainGrassDataManager | null>(null)
   let flattening = $state(false)
 
   const Y_RANGE = 5
+  const XZ_RANGE = 5
   /** Tight blend so flattening doesn't bleed into surrounding terrain (e.g. river banks). */
   const FLATTEN_BLEND_RADIUS = 2
 
@@ -64,10 +67,14 @@
       selectedPlacementId = id
       if (id === null) {
         baseY = null
+        baseX = null
+        baseZ = null
         textDraft = ''
       } else {
         const p = get(currentObjectData).placements.find((p) => p.id === id)
         baseY = p?.y ?? null
+        baseX = p?.x ?? null
+        baseZ = p?.z ?? null
         textDraft = p?.text ?? ''
       }
     }),
@@ -78,6 +85,7 @@
   ]
   onDestroy(() => {
     flushTextDraft()
+    if (saveTimer !== null) flushPendingSave()
     unsubs.forEach((u) => u())
   })
 
@@ -125,6 +133,71 @@
     if (region) {
       objectManager.saveObject(region.rx, region.rz, updated)
     }
+  }
+
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  /** Region + data snapshot captured when a debounced save is scheduled, so the
+   *  edit is persisted to the region it was made in even if the editor switches
+   *  regions (which replaces currentObjectData) before the timer fires. */
+  let pendingSaveRegion: { rx: number; rz: number } | null = null
+  let pendingSaveData: ObjectRegionData | null = null
+
+  /** Persist the current region, coalescing rapid edits (e.g. wheel notches)
+   *  into a single disk write instead of one PUT per change. */
+  function scheduleSave() {
+    // applyPatch has already published a fresh immutable snapshot to the store,
+    // so capturing it here pins the edit even if the store is later replaced.
+    pendingSaveRegion = get(currentEditorRegion)
+    pendingSaveData = get(currentObjectData)
+    if (saveTimer !== null) clearTimeout(saveTimer)
+    saveTimer = setTimeout(flushPendingSave, 250)
+  }
+
+  function flushPendingSave() {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    if (pendingSaveRegion && pendingSaveData) {
+      objectManager.saveObject(
+        pendingSaveRegion.rx,
+        pendingSaveRegion.rz,
+        pendingSaveData
+      )
+    }
+    pendingSaveRegion = null
+    pendingSaveData = null
+  }
+
+  /** Nudge a numeric field by one `step` per wheel notch (up = increase).
+   *  Applies to the store immediately for responsive feedback and debounces the
+   *  disk save so scrolling doesn't fire a PUT per notch. Used by the X/Y/Z and
+   *  Rot/RotX sliders so scrolling over them fine-tunes. Rotation fields wrap
+   *  into [0, 360). */
+  function wheelNudge(
+    e: WheelEvent,
+    field: 'x' | 'y' | 'z' | 'rotation' | 'rotationX',
+    step: number
+  ) {
+    if (selectedPlacementId === null) return
+    e.preventDefault()
+    const p = get(currentObjectData).placements.find(
+      (p) => p.id === selectedPlacementId
+    )
+    if (!p) return
+    const dir = e.deltaY < 0 ? 1 : -1
+    const cur = p[field] ?? 0
+    let next = Math.round((cur + dir * step) / step) * step
+    if (field === 'rotation' || field === 'rotationX') {
+      next = ((next % 360) + 360) % 360
+    }
+    applyPatch({ [field]: next })
+    // Re-anchor the X/Y/Z slider window so its thumb follows the wheeled value
+    // instead of clamping at the edge of the range fixed at selection time.
+    if (field === 'x') baseX = next
+    else if (field === 'y') baseY = next
+    else if (field === 'z') baseZ = next
+    scheduleSave()
   }
 
   /** Persist the per-instance text buffer (signposts etc.) to the selected
@@ -329,40 +402,70 @@
           <span class="info-label">Pos:</span>
           <span class="info-value">{formatPos(selectedPlacement)}</span>
         </div>
-        {#if baseY !== null}
+        {#snippet coordRow(
+          label: string,
+          field: 'x' | 'y' | 'z' | 'rotation' | 'rotationX',
+          min: number,
+          max: number,
+          step: number,
+          decimals: number,
+          suffix: string
+        )}
           <div class="coord-row">
-            <span class="info-label">Y:</span>
+            <span class="info-label">{label}:</span>
             <input
               class="y-slider"
               type="range"
-              min={baseY - Y_RANGE}
-              max={baseY + Y_RANGE}
-              step="0.05"
-              value={selectedPlacement.y}
+              {min}
+              {max}
+              {step}
+              value={selectedPlacement?.[field] ?? 0}
               oninput={(e) =>
-                applyPatch({ y: parseFloat(e.currentTarget.value) })}
+                applyPatch({ [field]: parseFloat(e.currentTarget.value) })}
               onchange={(e) =>
-                commitPatch({ y: parseFloat(e.currentTarget.value) })}
+                commitPatch({ [field]: parseFloat(e.currentTarget.value) })}
+              onwheel={(e) => wheelNudge(e, field, step)}
             />
-            <span class="y-value">{selectedPlacement.y.toFixed(2)}</span>
+            <span class="y-value"
+              >{(selectedPlacement?.[field] ?? 0).toFixed(
+                decimals
+              )}{suffix}</span
+            >
           </div>
+        {/snippet}
+        {@render coordRow(
+          'X',
+          'x',
+          (baseX ?? 0) - XZ_RANGE,
+          (baseX ?? 0) + XZ_RANGE,
+          0.05,
+          2,
+          ''
+        )}
+        {@render coordRow(
+          'Y',
+          'y',
+          (baseY ?? 0) - Y_RANGE,
+          (baseY ?? 0) + Y_RANGE,
+          0.05,
+          2,
+          ''
+        )}
+        {@render coordRow(
+          'Z',
+          'z',
+          (baseZ ?? 0) - XZ_RANGE,
+          (baseZ ?? 0) + XZ_RANGE,
+          0.05,
+          2,
+          ''
+        )}
+        {@render coordRow('Rot', 'rotation', 0, 360, 15, 0, '°')}
+        <!-- Bridges derive their walkable deck from yaw only; a pitched bridge
+             would render tilted while its collision/deck-Y stays flat. -->
+        {#if selectedDef?.kind !== 'bridge'}
+          {@render coordRow('RotX', 'rotationX', 0, 360, 15, 0, '°')}
         {/if}
-        <div class="coord-row">
-          <span class="info-label">Rot:</span>
-          <input
-            class="y-slider"
-            type="range"
-            min="0"
-            max="360"
-            step="15"
-            value={selectedPlacement.rotation}
-            oninput={(e) =>
-              applyPatch({ rotation: parseInt(e.currentTarget.value, 10) })}
-            onchange={(e) =>
-              commitPatch({ rotation: parseInt(e.currentTarget.value, 10) })}
-          />
-          <span class="y-value">{selectedPlacement.rotation}&deg;</span>
-        </div>
         <div class="coord-row">
           <span class="info-label">Floor:</span>
           <span class="info-value">{selectedPlacement.floorLevel + 1}F</span>

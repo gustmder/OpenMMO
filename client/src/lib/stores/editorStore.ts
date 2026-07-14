@@ -134,7 +134,8 @@ export interface BridgeMeta {
 export interface ObjectDef {
   id: string
   name: string
-  /** GLB filename under /models/objects/. Omitted for procedural objects. */
+  /** GLB path relative to /models/ (e.g. "objects/bed.glb", or "weapons/sword.glb"
+   *  for a model shared with an item's worldModel). Omitted for procedural objects. */
   model?: string
   /** Procedural builder id (e.g. "shopSign"). When set, geometry is generated
    *  in code instead of loaded from a GLB. */
@@ -164,7 +165,10 @@ export interface ObjectPlacement {
   x: number
   y: number
   z: number
+  /** Yaw (rotation about the Y axis) in degrees. */
   rotation: number
+  /** Pitch (rotation about the X axis) in degrees. Optional; absent = 0. */
+  rotationX?: number
   floorLevel: number
   /** Per-instance text shown as a speech bubble on hover (textLabel objects). */
   text?: string

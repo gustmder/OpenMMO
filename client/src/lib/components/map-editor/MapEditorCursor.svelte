@@ -46,6 +46,7 @@
   import { NpcScheduleManager } from '../../managers/npcScheduleManager'
   import type { NpcScheduleData } from '../../managers/npcScheduleManager'
   import { objectManager } from '../../managers/objectManager'
+  import { findAncestorWithUserData } from '../../managers/inputHandler'
   import { housingManager } from '../../managers/housingManager'
   import { playerFloorLevel } from '../../stores/housingStore'
   import { floorYBase, DEFAULT_WALL_HEIGHT } from '../../utils/house-geo-utils'
@@ -71,6 +72,9 @@
     heightManager: TerrainHeightManager | null
     splatManager: TerrainSplatManager | null
     grassDataManager: TerrainGrassDataManager | null
+    /** Live accessor for the object-overlay group, so object selection can cast
+     *  a ray at the placed object meshes. */
+    getObjectGroup?: () => THREE.Group | null
   }
 
   let {
@@ -80,6 +84,7 @@
     heightManager,
     splatManager,
     grassDataManager = null,
+    getObjectGroup,
   }: Props = $props()
 
   let isPainting = $state(false)
@@ -169,21 +174,54 @@
   let lastRegionX = NaN
   let lastRegionZ = NaN
 
-  function raycastTerrain(event: MouseEvent): THREE.Intersection | null {
-    if (!camera) return null
-
-    const meshes = terrainMeshes.filter((m): m is THREE.Mesh => m !== undefined)
-    if (meshes.length === 0) return null
-
+  /** Aim `raycaster` down the ray through the click point. Returns false if
+   *  there's no camera yet. */
+  function setRayFromEvent(event: MouseEvent): boolean {
+    if (!camera) return false
     const rect = (event.target as HTMLElement).getBoundingClientRect()
     mouseNDC.set(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     )
-
     raycaster.setFromCamera(mouseNDC, camera)
+    return true
+  }
+
+  function raycastTerrain(event: MouseEvent): THREE.Intersection | null {
+    const meshes = terrainMeshes.filter((m): m is THREE.Mesh => m !== undefined)
+    if (meshes.length === 0 || !setRayFromEvent(event)) return null
+
     const intersects = raycaster.intersectObjects(meshes, false)
     return intersects.length > 0 ? intersects[0] : null
+  }
+
+  /** Pick the placement to select from a click, casting a real ray against the
+   *  object meshes so a small prop resting on a big one (e.g. a sword on a
+   *  table) can be picked by clicking it. Returns the nearest hit's placement;
+   *  if that placement is already selected, cycles to the next object further
+   *  down the same ray so stacked objects can all be reached by re-clicking.
+   *  Returns null when the ray misses every object (caller falls back to the
+   *  forgiving XZ-nearest test). */
+  function pickObjectIdAlongRay(event: MouseEvent): number | null {
+    const group = getObjectGroup?.()
+    if (!group || !setRayFromEvent(event)) return null
+    const hits = raycaster.intersectObjects(group.children, true)
+    // Unique placement ids in ray order (nearest surface first).
+    const ids: number[] = []
+    for (const h of hits) {
+      // The selection box is a LineSegments child of the selected clone; its
+      // wide raycast threshold would otherwise inject phantom hits.
+      if (h.object instanceof THREE.LineSegments) continue
+      const owner = findAncestorWithUserData(h.object, 'objectId')
+      const id = owner?.userData.objectId as number | undefined
+      if (id != null && !ids.includes(id)) ids.push(id)
+    }
+    if (ids.length === 0) return null
+    const cur = get(selectedObjectPlacementId)
+    const idx = cur == null ? -1 : ids.indexOf(cur)
+    // Re-clicking the same stack cycles to the next object down the ray;
+    // clicking a fresh spot selects the topmost.
+    return idx === -1 ? ids[0] : ids[(idx + 1) % ids.length]
   }
 
   function updateCursorFromHit(hit: THREE.Intersection) {
@@ -572,7 +610,11 @@
     return def?.defaultY ?? terrainY + floorYBase(floor, DEFAULT_WALL_HEIGHT)
   }
 
-  async function handleObjectMouseDown(worldX: number, worldZ: number) {
+  async function handleObjectMouseDown(
+    worldX: number,
+    worldZ: number,
+    event: MouseEvent
+  ) {
     if (currentObjectSubTool === 'place') {
       if (!currentObjectType) return
       const snapped = snapXZ(worldX, worldZ)
@@ -602,6 +644,16 @@
         await objectManager.saveObject(region.rx, region.rz, updated)
       }
     } else {
+      // Precise pick first: cast a ray at the actual object meshes so clicking
+      // a small prop on top of a larger one selects the prop (and re-clicking
+      // cycles through the stack).
+      const picked = pickObjectIdAlongRay(event)
+      if (picked != null) {
+        selectedObjectPlacementId.set(picked)
+        return
+      }
+      // Fallback: forgiving XZ-nearest test (click near an object's base, or
+      // hit nothing pickable such as a flat/procedural object).
       const data = get(currentObjectData)
       const threshold = 4
       let bestDist = threshold * threshold
@@ -769,7 +821,7 @@
 
     if (currentTool === 'object') {
       updateCursorFromHit(hit)
-      handleObjectMouseDown(hit.point.x, hit.point.z)
+      handleObjectMouseDown(hit.point.x, hit.point.z, event)
       return
     }
 

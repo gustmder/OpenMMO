@@ -66,8 +66,8 @@
     modelsLoadPromise = (async () => {
       try {
         const [gltf1, gltf2] = await Promise.all([
-          loadGLB('/models/tree.glb'),
-          loadGLB('/models/tree2.glb'),
+          loadGLB('/models/vegetation/tree.glb'),
+          loadGLB('/models/vegetation/tree2.glb'),
         ])
 
         for (let t = 0; t < 2; t++) {

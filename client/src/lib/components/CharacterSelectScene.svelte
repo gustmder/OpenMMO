@@ -16,7 +16,7 @@
 
   // Preload assets needed by game scene so they're cached when it mounts
   loadSplatLayers()
-  for (const model of ['sword.glb', 'spear.glb']) {
+  for (const model of ['weapons/sword.glb', 'weapons/spear.glb']) {
     loadGLB(getWeaponModelPath(model))
   }
 

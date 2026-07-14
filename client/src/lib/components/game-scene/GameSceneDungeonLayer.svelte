@@ -24,6 +24,7 @@
   } from '../../managers/dungeonManager'
   import { objectManager } from '../../managers/objectManager'
   import { loadGLB } from '../../utils/gltfCache'
+  import { getObjectModelPath } from '../../utils/modelPaths'
   import { rotatedRectAabb } from '../../utils/objectFootprint'
   import type { DoorLeaf, InteriorDoor } from '../../utils/dungeon-geometry'
   import { networkManager } from '../../network/socket'
@@ -277,10 +278,10 @@
       prop.kind === 'chest'
         ? objectManager.getCatalogEntry(CHEST_ANIMATED_ID)
         : objectManager.getCatalogEntry(prop.kind)
-    if (!def) return
+    if (!def?.model) return
     let template: THREE.Object3D
     try {
-      const gltf = await loadGLB(`/models/objects/${def.model}`)
+      const gltf = await loadGLB(getObjectModelPath(def.model))
       template = gltf.scene
       if (prop.kind === 'chest' && !chestOpenClip && gltf.animations.length) {
         chestOpenClip =
@@ -473,10 +474,10 @@
   ): Promise<THREE.Object3D | null> {
     const variantId = BROKEN_VARIANT[kind]
     const def = variantId ? objectManager.getCatalogEntry(variantId) : null
-    if (!def) return null
+    if (!def?.model) return null
     let template: THREE.Object3D
     try {
-      template = (await loadGLB(`/models/objects/${def.model}`)).scene
+      template = (await loadGLB(getObjectModelPath(def.model))).scene
     } catch {
       return null
     }

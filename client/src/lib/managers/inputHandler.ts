@@ -14,7 +14,7 @@ function hasAncestorBridge(obj: THREE.Object3D | null): boolean {
 }
 
 /** Walk up the parent chain to the first object carrying `key` in userData. */
-function findAncestorWithUserData(
+export function findAncestorWithUserData(
   obj: THREE.Object3D | null,
   key: string
 ): THREE.Object3D | null {
