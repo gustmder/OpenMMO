@@ -20,3 +20,4 @@ coin_pile,Coin Pile,A small heap of loose copper coins.,0,,false,sword.png,objec
 healing_potion,Healing Potion,A crimson brew that knits wounds and restores vitality.,0.5,,true,healing_potion.png,objects/health_potion.glb,healing_potion,6d4,,500
 scroll_of_return,Scroll of Return,Reading the arcane runes whisks you back to town in a flash of light.,0.2,,true,scroll_of_return.png,objects/scroll.glb,return_scroll,,,800
 scroll_of_enchant_weapon,Scroll of Enchant Weapon,Arcane runes that hone your wielded weapon's edge — though greedy re-reading may destroy it.,0.2,,true,scroll_of_enchant_weapon.png,objects/scroll_enchant.glb,enchant_scroll,,,1200
+table,Table,A sturdy wooden table.,20,,false,table_icon.png,objects/table.glb,furniture,,wood,3000
