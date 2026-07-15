@@ -24,6 +24,19 @@ export function findAncestorWithUserData(
   return null
 }
 
+/** True when the object sits under a house wall/roof group. The front and back
+ *  groups (south/west and north/east walls plus roofs) are tagged
+ *  `housingSurface: 'wall'` at construction; floor slabs and stairs are tagged
+ *  `'floor'` and stay valid move-to-ground targets. Used to skip the outer
+ *  walls that sit between the isometric camera and the interior floor when
+ *  clicking a floor tile to walk inside. */
+function isHouseWall(obj: THREE.Object3D | null): boolean {
+  return (
+    findAncestorWithUserData(obj, 'housingSurface')?.userData.housingSurface ===
+    'wall'
+  )
+}
+
 /** Entity clicks get a little slack: the click point plus 4 nearby offsets
  *  (10px up/right/down/left) are each raycast until one resolves. */
 const CLICK_RAY_OFFSETS = [
@@ -418,14 +431,19 @@ class InputHandler {
     // becomes a move request instead of silently producing `none`.
     const intersects = raycaster.intersectObjects(context.groundMeshes, true)
 
-    if (intersects.length > 0) {
-      const firstHit = intersects[0]
+    // Hits are sorted nearest-first. A house's outer walls/roof sit between the
+    // isometric camera and the interior floor, so the naive closest hit would
+    // land the player on the south/west wall when they click a floor tile to
+    // walk inside. Skip wall/roof hits and take the first floor/terrain surface
+    // behind them (pathfinding then routes around solid walls to the door).
+    const groundHit = intersects.find((hit) => !isHouseWall(hit.object))
+    if (groundHit) {
       return {
         type: 'move_to_ground',
         position: {
-          x: firstHit.point.x,
-          y: firstHit.point.y,
-          z: firstHit.point.z,
+          x: groundHit.point.x,
+          y: groundHit.point.y,
+          z: groundHit.point.z,
         },
       }
     }

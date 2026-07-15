@@ -108,12 +108,16 @@ export function buildHouseGroup(
   for (const [fl, entries] of perFloor) {
     const front = new THREE.Group()
     front.name = `front_f${fl}`
+    front.userData.housingSurface = 'wall'
     const back = new THREE.Group()
     back.name = `back_f${fl}`
+    back.userData.housingSurface = 'wall'
     const floor = new THREE.Group()
     floor.name = `floor_f${fl}`
+    floor.userData.housingSurface = 'floor'
     const stair = new THREE.Group()
     stair.name = `stair_f${fl}`
+    stair.userData.housingSurface = 'floor'
     mergedMeshCount += addMergedMeshes(front, entries.front)
     mergedMeshCount += addMergedMeshes(back, entries.back)
     mergedMeshCount += addMergedMeshes(floor, entries.floor)
