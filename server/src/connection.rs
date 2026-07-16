@@ -39,11 +39,17 @@ fn token_matches(provided: &str, expected: &str) -> bool {
 /// How many seconds without a heartbeat before we consider the client dead.
 const HEARTBEAT_TIMEOUT_SECS: u64 = 30;
 
+/// Grace period before an unauthenticated connection is dropped. Measured
+/// from connect time (not heartbeats — those are accepted pre-auth) so idle
+/// sockets can't hold server resources without ever authenticating.
+const UNAUTH_TIMEOUT_SECS: u64 = 60;
+
 struct ConnectionState {
     account_name: Option<String>,
     player_id: Option<PlayerId>,
     direct_rx: Option<mpsc::UnboundedReceiver<ServerMessage>>,
     pending_character_attributes: Option<CharacterAttributes>,
+    connected_at: std::time::Instant,
     last_heartbeat: std::time::Instant,
     is_npc: bool,
 }
@@ -55,6 +61,7 @@ impl ConnectionState {
             player_id: None,
             direct_rx: None,
             pending_character_attributes: None,
+            connected_at: std::time::Instant::now(),
             last_heartbeat: std::time::Instant::now(),
             is_npc: false,
         }
@@ -108,8 +115,14 @@ pub async fn handle_connection(
 
     loop {
         tokio::select! {
-            // Heartbeat timeout check (only for in-game players)
+            // Periodic timeout checks: unauth grace period, in-game heartbeat
             _ = heartbeat_check.tick() => {
+                if state.account_name.is_none()
+                    && state.connected_at.elapsed().as_secs() > UNAUTH_TIMEOUT_SECS
+                {
+                    warn!("Dropping connection: unauthenticated after {}s", UNAUTH_TIMEOUT_SECS);
+                    break;
+                }
                 if state.player_id.is_some()
                     && state.last_heartbeat.elapsed().as_secs() > HEARTBEAT_TIMEOUT_SECS
                 {
