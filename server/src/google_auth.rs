@@ -20,11 +20,13 @@ struct Jwks {
     keys: Vec<Jwk>,
 }
 
-/// Only `sub` is read on purpose: the token also carries email/name/picture,
-/// but we neither parse nor store them.
+/// `sub` identifies the account. Email is parsed only to match against the
+/// REST-write admin allowlist; neither is stored.
 #[derive(Debug, Deserialize)]
 pub struct GoogleClaims {
     pub sub: String,
+    pub email: Option<String>,
+    pub email_verified: Option<bool>,
 }
 
 pub struct GoogleAuthVerifier {

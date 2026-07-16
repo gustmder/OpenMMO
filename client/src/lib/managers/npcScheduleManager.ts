@@ -1,4 +1,4 @@
-import { getTerrainApiUrl } from '../utils/networkUtils'
+import { apiFetch, getTerrainApiUrl } from '../utils/networkUtils'
 
 export interface NpcScheduleEntry {
   at: string
@@ -36,7 +36,7 @@ export class NpcScheduleManager {
   }
 
   async saveSchedule(name: string, data: NpcScheduleData): Promise<void> {
-    const res = await fetch(
+    const res = await apiFetch(
       `${this.baseUrl}/api/npcs/${encodeURIComponent(name)}/schedule`,
       {
         method: 'PUT',

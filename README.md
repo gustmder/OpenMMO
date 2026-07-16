@@ -140,7 +140,7 @@ Agents and humans connect to the same world, act under the same rules, and inter
 | 10004 | Client (Vite dev)                |
 | 10005 | GLB Editor                       |
 | 10006 | Server WebSocket (internal only)  |
-| 10007 | Server Terrain/Housing/NPCs API (internal only) |
+| 10007 | Server Terrain/Housing/NPCs API (binds 127.0.0.1; writes require auth) |
 
 > **Proxy Rule:** Vite dev server proxies `/ws` → `ws://localhost:10006` and `/api/{terrain,housing,npcs}` → `http://localhost:10007` automatically (see `client/vite.config.ts`).
 
@@ -152,7 +152,7 @@ This project is organized as a **Cargo Workspace**. The shared Rust crate (`shar
 cargo watch -w server -w shared -w data-src -x "run -p onlinerpg-server"
 ```
 
-The server listens on port 10006 by default. The terrain/housing/NPCs REST API starts automatically on port 10007 (game port + 1).
+The server listens on port 10006 by default. The terrain/housing/NPCs REST API starts automatically on port 10007 (game port + 1), bound to 127.0.0.1 (`--api-bind` to override). Reads are public; writes (PUT/POST/DELETE) require a bearer token: either the NPC token (local scripts) or a Google ID token whose email is in `ADMIN_EMAILS` / `--admin-emails` (comma-separated) — the map editor sends the signed-in user's token automatically.
 
 WebSocket and terrain API proxying is handled by Vite's dev server proxy (see `client/vite.config.ts`), so no separate socat or SSL proxy is needed.
 

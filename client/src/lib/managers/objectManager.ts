@@ -1,4 +1,4 @@
-import { getTerrainApiUrl } from '../utils/networkUtils'
+import { apiFetch, getTerrainApiUrl } from '../utils/networkUtils'
 import type {
   ObjectDef,
   ObjectPlacement,
@@ -71,7 +71,7 @@ export class ObjectManager {
     rz: number,
     data: ObjectRegionData
   ): Promise<void> {
-    await fetch(`${this.terrainApiUrl}/api/terrain/objects/${rx}/${rz}`, {
+    await apiFetch(`${this.terrainApiUrl}/api/terrain/objects/${rx}/${rz}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),

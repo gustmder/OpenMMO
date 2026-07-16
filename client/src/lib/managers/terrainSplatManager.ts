@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { getTerrainApiUrl } from '../utils/networkUtils'
+import { apiFetch, getTerrainApiUrl } from '../utils/networkUtils'
 import { TERRAIN_TILE_SIZE } from '../components/game-scene/terrain-utils'
 import { worldToTileCoord } from './terrain-height-types'
 import { smoothstep, SPLAT_PADDED_DIM } from '../terrain/terrain-constants'
@@ -515,7 +515,7 @@ export class TerrainSplatManager {
       const body = new Uint8Array(data).buffer as ArrayBuffer
 
       try {
-        await fetch(url, {
+        await apiFetch(url, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/octet-stream' },
           body,

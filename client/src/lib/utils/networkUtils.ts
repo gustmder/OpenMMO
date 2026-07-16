@@ -13,3 +13,25 @@ export function getTerrainApiUrl(): string {
   // Use same origin so the request goes through the proxy
   return window.location.origin
 }
+
+let apiAuthToken: string | null = null
+
+/** Google ID token for REST writes (server checks the admin allowlist).
+ *  Single owner of the credential; socket.ts sets/clears it on auth. */
+export function setApiAuthToken(token: string | null): void {
+  apiAuthToken = token
+}
+
+export function getApiAuthToken(): string | null {
+  return apiAuthToken
+}
+
+/** fetch with the auth header attached; use for all /api write requests. */
+export function apiFetch(
+  url: string,
+  init: RequestInit & { headers?: Record<string, string> } = {}
+): Promise<Response> {
+  const headers: Record<string, string> = { ...init.headers }
+  if (apiAuthToken) headers.Authorization = `Bearer ${apiAuthToken}`
+  return fetch(url, { ...init, headers })
+}

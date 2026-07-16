@@ -1,4 +1,4 @@
-import { getTerrainApiUrl } from '../utils/networkUtils'
+import { apiFetch, getTerrainApiUrl } from '../utils/networkUtils'
 import {
   decodeGrassData,
   encodeGrassBuffer,
@@ -111,7 +111,7 @@ export class TerrainGrassDataManager {
       buffer: current.buffer.slice(0),
     })
     // Tell server to snapshot (fire-and-forget, no data transfer)
-    fetch(
+    apiFetch(
       `${this.terrainApiUrl}/api/terrain/grass-original/${tileX}/${tileZ}/ensure`,
       { method: 'POST' }
     ).catch(() => {})
@@ -177,7 +177,7 @@ export class TerrainGrassDataManager {
     try {
       const url = `${this.terrainApiUrl}/api/terrain/grass/${tileX}/${tileZ}`
       const wireBuffer = encodeGrassBuffer(data, tileX, tileZ)
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: wireBuffer,

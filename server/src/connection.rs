@@ -18,16 +18,18 @@ use tracing::{error, info, warn};
 
 const FALLBACK_DEFAULT_MAX_HP: u32 = 13;
 
-/// Credential checkers shared by every connection.
+/// Credential checkers shared by every connection and the REST API.
 pub struct AuthContext {
     /// None when the server was started without a Google client id; browser
     /// logins are rejected until it is configured.
     pub google: Option<GoogleAuthVerifier>,
     pub npc_token: String,
+    /// Google account emails allowed to call REST write endpoints.
+    pub admin_emails: Vec<String>,
 }
 
 /// Constant-time equality so the NPC token can't be probed byte by byte.
-fn token_matches(provided: &str, expected: &str) -> bool {
+pub fn token_matches(provided: &str, expected: &str) -> bool {
     provided.len() == expected.len()
         && provided
             .bytes()

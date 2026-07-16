@@ -1,4 +1,4 @@
-import { getTerrainApiUrl } from '../utils/networkUtils'
+import { apiFetch, getTerrainApiUrl } from '../utils/networkUtils'
 import {
   TERRAIN_TILE_SIZE,
   getTerrainChunkFromPosition,
@@ -127,7 +127,7 @@ export class HousingManager {
   ): Promise<HouseData | null> {
     try {
       const payload = { ...house, passability: buildPassability(house) }
-      const resp = await fetch(url, {
+      const resp = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -146,7 +146,7 @@ export class HousingManager {
   /** Delete a house from the server and remove from local cache. */
   async deleteHouse(houseId: string): Promise<boolean> {
     try {
-      const resp = await fetch(`${this.apiUrl}/api/housing/${houseId}`, {
+      const resp = await apiFetch(`${this.apiUrl}/api/housing/${houseId}`, {
         method: 'DELETE',
       })
       if (!resp.ok) return false

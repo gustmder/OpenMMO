@@ -1,4 +1,4 @@
-import { getTerrainApiUrl } from '../utils/networkUtils'
+import { apiFetch, getTerrainApiUrl } from '../utils/networkUtils'
 
 export interface NoSpawnZone {
   minX: number
@@ -60,7 +60,7 @@ export class ZoneManager {
   }
 
   async saveZone(rx: number, rz: number, data: ZoneData): Promise<void> {
-    await fetch(`${this.terrainApiUrl}/api/terrain/zones/${rx}/${rz}`, {
+    await apiFetch(`${this.terrainApiUrl}/api/terrain/zones/${rx}/${rz}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),

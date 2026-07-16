@@ -1,3 +1,4 @@
+import { apiFetch } from '../utils/networkUtils'
 import { tileKey, type TerrainHeightState } from './terrain-height-types'
 
 export async function loadHeightmap(
@@ -79,7 +80,7 @@ export function ensureOriginalHeightmap(
   if (!current) return
   state.originalHeightmaps.set(key, new Uint16Array(current))
   state.missingOriginalTiles.delete(key)
-  fetch(
+  apiFetch(
     `${terrainApiUrl}/api/terrain/height-original/${tileX}/${tileZ}/ensure`,
     { method: 'POST' }
   ).catch(() => {})
@@ -110,7 +111,7 @@ async function saveTileSet(
     )
 
     try {
-      await fetch(url, {
+      await apiFetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/octet-stream' },
         body,

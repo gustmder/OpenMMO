@@ -5,7 +5,11 @@ import type { WallDirection } from '../utils/house-geometry'
 import { gameStore, resetGameStore } from '../stores/gameStore'
 import { remotePlayerManager } from '../managers/remotePlayerManager'
 import { monsterManager } from '../managers/monsterManager'
-import { getDefaultServerUrl } from '../utils/networkUtils'
+import {
+  getApiAuthToken,
+  getDefaultServerUrl,
+  setApiAuthToken,
+} from '../utils/networkUtils'
 import { clearServerGameTime } from '../stores/timeStore'
 import { markShopRequested, shopSession } from '../stores/tradeStore'
 import initWasm, {
@@ -47,7 +51,6 @@ class NetworkManager {
   private maxReconnectAttempts = 5
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private lastServerUrl: string = ''
-  private lastGoogleIdToken: string = ''
   private lastCharacterId: number | null = null
   private wasmReady = false
 
@@ -174,10 +177,11 @@ class NetworkManager {
         monsterManager.reset()
         remotePlayerManager.reset()
         this.connect()
-        if (this.lastGoogleIdToken && this.lastCharacterId) {
+        const googleIdToken = getApiAuthToken()
+        if (googleIdToken && this.lastCharacterId) {
           const opened = await this.waitForSocketOpen(5000)
           if (opened) {
-            this.authenticateWithGoogle(this.lastGoogleIdToken)
+            this.authenticateWithGoogle(googleIdToken)
             let unsubSuccess = () => {}
             let unsubError = () => {}
             const cleanup = () => {
@@ -517,7 +521,7 @@ class NetworkManager {
   // --- Auth & character request methods ---
 
   private authenticateWithGoogle(googleIdToken: string): boolean {
-    this.lastGoogleIdToken = googleIdToken
+    setApiAuthToken(googleIdToken)
 
     return this.sendAndSerialize({
       Authenticate: { google_id_token: googleIdToken },
@@ -527,8 +531,8 @@ class NetworkManager {
   /// Drop cached credentials so a later reconnect can't re-auth as this user.
   /// Call on logout/kick, not on transient disconnects (which must reconnect).
   clearSession() {
-    this.lastGoogleIdToken = ''
     this.lastCharacterId = null
+    setApiAuthToken(null)
   }
 
   async requestAuthentication(
@@ -767,7 +771,7 @@ class NetworkManager {
     this.resetAllState()
 
     const serverUrl = this.lastServerUrl
-    const googleIdToken = this.lastGoogleIdToken
+    const googleIdToken = getApiAuthToken()
     const characterId = this.lastCharacterId
     if (!serverUrl || !googleIdToken || !characterId) {
       console.warn('Reconnect skipped: missing account or character context')
@@ -817,7 +821,7 @@ class NetworkManager {
     this.resetAllState()
 
     const serverUrl = this.lastServerUrl
-    const googleIdToken = this.lastGoogleIdToken
+    const googleIdToken = getApiAuthToken()
     if (!serverUrl || !googleIdToken) {
       return { ok: false, message: 'Missing account context' }
     }

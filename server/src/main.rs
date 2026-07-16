@@ -1,3 +1,4 @@
+mod api_auth;
 mod auth;
 mod celestial;
 mod connection;
@@ -31,7 +32,6 @@ use terrain::routes::terrain_router;
 use tokio::net::TcpListener;
 use tokio::time::Duration;
 use tower_http::compression::CompressionLayer;
-use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
 use tracing_subscriber;
 
@@ -46,6 +46,16 @@ struct Args {
     /// Port for terrain REST API (default: game port + 1)
     #[arg(long)]
     terrain_port: Option<u16>,
+
+    /// Bind address for the REST API. Loopback by default: the vite proxy
+    /// and local bots are the only intended callers.
+    #[arg(long, default_value = "127.0.0.1")]
+    api_bind: String,
+
+    /// Comma-separated Google emails allowed to use REST write endpoints
+    /// (map editor)
+    #[arg(long, env = "ADMIN_EMAILS", default_value = "")]
+    admin_emails: String,
 
     /// Directory for terrain data files
     #[arg(long, default_value = "./data/terrain")]
@@ -132,7 +142,20 @@ async fn main() {
         );
         return;
     }
-    let auth_ctx = Arc::new(AuthContext { google, npc_token });
+    let admin_emails: Vec<String> = args
+        .admin_emails
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if admin_emails.is_empty() {
+        warn!("No --admin-emails / ADMIN_EMAILS set: REST writes require the NPC token");
+    }
+    let auth_ctx = Arc::new(AuthContext {
+        google,
+        npc_token,
+        admin_emails,
+    });
     let initial_game_time = match auth_service.load_world_time() {
         Ok(Some(saved)) => {
             info!(
@@ -293,12 +316,9 @@ async fn main() {
         }
     };
 
-    // Start terrain REST API server
+    // Start terrain REST API server. No CORS layer on purpose: browsers only
+    // reach this API same-origin through the vite proxy.
     let terrain_port = args.terrain_port.unwrap_or(args.port + 1);
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
     let terrain_app = terrain_router(Arc::clone(&terrain_io))
         .merge(housing_router(
             Arc::clone(&housing_io),
@@ -306,9 +326,12 @@ async fn main() {
             Arc::clone(&game_state),
         ))
         .merge(npc_router(npc_io))
-        .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&auth_ctx),
+            api_auth::require_admin_for_writes,
+        ))
         .layer(CompressionLayer::new());
-    let terrain_addr = format!("0.0.0.0:{}", terrain_port);
+    let terrain_addr = format!("{}:{}", args.api_bind, terrain_port);
     match TcpListener::bind(&terrain_addr).await {
         Ok(terrain_listener) => {
             info!("Terrain REST API listening on: {}", terrain_addr);
