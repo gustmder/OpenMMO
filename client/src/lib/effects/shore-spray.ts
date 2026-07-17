@@ -56,7 +56,7 @@ export const SHORE_SPRAY_EMIT_RADIUS_M = 30
 /** Safety cap on cells considered per frame. */
 export const SHORE_SPRAY_MAX_ACTIVE = 4000
 /** Spawns/sec per cell sitting exactly on a full-strength breaking crest. */
-const SHORE_SPRAY_BASE_RATE = 400
+const SHORE_SPRAY_BASE_RATE = 800
 /** Depth half-window (m) around the crest a cell still sprays through — the
  *  thickness of the traveling foam band. Thin = a single crisp line. */
 const CREST_BAND_M = 0.06
@@ -79,22 +79,22 @@ const MIN_BED_SLOPE = 0.01
 /** Droplet ballistics — mostly a shoreward drift with only a small lift.
  *  Vertical and shoreward speeds are independent so the lift can be tiny
  *  without killing the toward-land motion. */
-const SPRAY_GRAVITY = 2.5
-const SPRAY_VY_MIN = 0.2
-const SPRAY_VY_RANGE = 0.2
+const SPRAY_GRAVITY = 0.5
+const SPRAY_VY_MIN = 0.05
+const SPRAY_VY_RANGE = 0.05
 /** Shoreward (toward-land) drift speed — the dominant motion. */
-const SPRAY_FORWARD_MIN = 0.3
-const SPRAY_FORWARD_RANGE = 0.3
+const SPRAY_FORWARD_MIN = 0.1
+const SPRAY_FORWARD_RANGE = 0.1
 /** Velocity scatter (along-crest) applied to the launch direction. */
-const SPRAY_SCATTER = 0.3
+const SPRAY_SCATTER = 0.1
 /** Isotropic spawn-position jitter (m): fills sub-cell gaps without the
  *  tangent streaking. Note it also thickens the line a touch in the depth
  *  direction, so keep it small. */
 const SPRAY_JITTER_M = 0.4
 const SPRAY_LIFE_MIN = 0.4
 const SPRAY_LIFE_RANGE = 0.5
-const SPRAY_SCALE_MIN = 0.2
-const SPRAY_SCALE_RANGE = 0.3
+const SPRAY_SCALE_MIN = 0.1
+const SPRAY_SCALE_RANGE = 0.15
 const SPRAY_QUAD = 0.28
 
 /** Spray fade-out in crest-travel (`move`) space: `brk` supplies the
@@ -108,6 +108,8 @@ const SPRAY_UV_ATTR = 'aShoreSprayUV'
 /** Fraction of the foam texture one droplet shows. Bigger = more ragged
  *  structure per particle (so small particles still read as foam, not dots). */
 const SPRAY_FOAM_PATCH = 0.34
+/** Global opacity multiplier. */
+const SPRAY_MAX_OPACITY = 0.7
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any // TSL node
@@ -370,6 +372,7 @@ export class ShoreSpraySystem {
       .mul(vignette)
       .mul(attribute(SPRAY_OPACITY_ATTR, 'float'))
       .mul(this.uDayDim)
+      .mul(SPRAY_MAX_OPACITY)
 
     this.mesh = new THREE.InstancedMesh(geom, mat, MAX_SHORE_SPRAY)
     this.mesh.frustumCulled = false
