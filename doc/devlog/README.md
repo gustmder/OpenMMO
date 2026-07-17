@@ -6,6 +6,7 @@ Development notes for notable project changes, asset additions, and design decis
 
 | Date | Topics | Notes |
 |------|--------|-------|
+| [2026-07-17](2026-07-17.md) | Google Sign-In | Replaced the password login with Google Sign-In: the login screen shows a single Google button and the server verifies the ID token. The old password path was retired for security; new accounts get a random `player_xxxxxx` name and no email or profile name is stored. |
 | [2026-07-16](2026-07-16.md) | Off-Hand Shields, Solid Furniture Blocks Movement | Added Wooden and Raven off-hand shields, each with a Guard stat that now feeds into combat and shows on the character sheet. Solid furniture now seals the tiles it sits on so players and NPCs walk around it instead of through it; the collision logic is shared Rust, so the browser, bots, and server all agree on which tiles are blocked. |
 | [2026-07-14](2026-07-14.md) | Dressing Up Rica's Shop | Hung a procedural "Rica's General Store" sign, decorated the shop interior with item models placed as furniture, and updated Rica's stock to sell Healing Potions and Scrolls of Return. |
 | [2026-07-13](2026-07-13.md) | Horizontal World Wrapping | Completed the partial X-wrap implementation so the east and west edges now connect without fallback terrain or a stuck map marker. |
