@@ -16,7 +16,9 @@ use onlinerpg_terrain::{
 use std::sync::Arc;
 use tracing::{error, info};
 
-use super::{next_house_id, validate_house, world_to_chunk, HousingIO, CHUNK_SIZE};
+use super::{
+    is_valid_house_id, next_house_id, validate_house, world_to_chunk, HousingIO, CHUNK_SIZE,
+};
 
 #[derive(Clone)]
 struct HousingRouteState {
@@ -61,6 +63,9 @@ async fn get_house(
     Path(house_id): Path<String>,
     State(state): State<HousingRouteState>,
 ) -> Result<Json<HouseData>, StatusCode> {
+    if !is_valid_house_id(&house_id) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let house = state.housing.find_house(&house_id).await.map_err(|e| {
         error!("Failed to find house {}: {}", house_id, e);
         StatusCode::INTERNAL_SERVER_ERROR
@@ -109,6 +114,9 @@ async fn update_house(
     State(state): State<HousingRouteState>,
     Json(mut house): Json<HouseData>,
 ) -> Result<Json<HouseData>, (StatusCode, String)> {
+    if !is_valid_house_id(&house_id) {
+        return Err((StatusCode::BAD_REQUEST, "invalid house id".to_string()));
+    }
     house.id = house_id;
 
     let neighbors = load_neighbors(&state.housing, &house).await?;
@@ -178,6 +186,9 @@ async fn delete_house(
     Path(house_id): Path<String>,
     State(state): State<HousingRouteState>,
 ) -> Result<StatusCode, StatusCode> {
+    if !is_valid_house_id(&house_id) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     // Search all chunks for this house
     let house = state.housing.find_house(&house_id).await.map_err(|e| {
         error!("Failed to find house {} for deletion: {}", house_id, e);

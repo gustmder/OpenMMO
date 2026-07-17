@@ -177,6 +177,17 @@ pub fn next_house_id(cx: i32, cz: i32, existing: &[HouseData]) -> String {
     format!("{}{}", prefix, max_n + 1)
 }
 
+/// Reject IDs that could escape the housing directory when used as a filename.
+/// Real IDs are `r{cx}_{cz}_{n}`, so only alphanumerics, `_`, `+`, `-` are allowed;
+/// forbidding `.` and `/` blocks path traversal (`..`) and extension injection.
+pub fn is_valid_house_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-'))
+}
+
 /// Parse chunk coordinates from a house ID (e.g. `r-24_+07_1` → Some((-24, 7)))
 pub fn parse_chunk_from_id(id: &str) -> Option<(i32, i32)> {
     let s = id.strip_prefix('r')?;
@@ -202,8 +213,17 @@ impl HousingIO {
         self.base_dir.join(chunk_prefix(cx, cz))
     }
 
-    fn house_path(&self, cx: i32, cz: i32, house_id: &str) -> PathBuf {
-        self.chunk_dir(cx, cz).join(format!("{}.json", house_id))
+    /// Build the on-disk path for a house. Rejects ids that could escape the
+    /// housing directory, so every fs op funnels its validation through here —
+    /// including callers that skip the route-level guard (e.g. `toggle_door`).
+    fn house_path(&self, cx: i32, cz: i32, house_id: &str) -> std::io::Result<PathBuf> {
+        if !is_valid_house_id(house_id) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid house id",
+            ));
+        }
+        Ok(self.chunk_dir(cx, cz).join(format!("{}.json", house_id)))
     }
 
     /// Read all houses in a chunk.
@@ -235,10 +255,10 @@ impl HousingIO {
     /// Save a house to disk. Creates chunk directory if needed.
     pub async fn write_house(&self, house: &HouseData) -> std::io::Result<()> {
         let (cx, cz) = world_to_chunk(house.origin.x, house.origin.z);
+        let path = self.house_path(cx, cz, &house.id)?;
         let dir = self.chunk_dir(cx, cz);
         fs::create_dir_all(&dir).await?;
 
-        let path = self.house_path(cx, cz, &house.id);
         let json = serde_json::to_string_pretty(house)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         fs::write(&path, json).await?;
@@ -248,7 +268,7 @@ impl HousingIO {
 
     /// Delete a house from disk. Returns true if the file existed.
     pub async fn delete_house(&self, house_id: &str, cx: i32, cz: i32) -> std::io::Result<bool> {
-        let path = self.house_path(cx, cz, house_id);
+        let path = self.house_path(cx, cz, house_id)?;
         match fs::remove_file(&path).await {
             Ok(()) => {
                 info!("Deleted house {} from {:?}", house_id, path);
@@ -262,7 +282,7 @@ impl HousingIO {
     /// Find and read a house by ID. Parses chunk coords from the ID for O(1) lookup.
     pub async fn find_house(&self, house_id: &str) -> std::io::Result<Option<HouseData>> {
         if let Some((cx, cz)) = parse_chunk_from_id(house_id) {
-            let path = self.house_path(cx, cz, house_id);
+            let path = self.house_path(cx, cz, house_id)?;
             match fs::read_to_string(&path).await {
                 Ok(content) => match serde_json::from_str::<HouseData>(&content) {
                     Ok(house) => return Ok(Some(house)),
@@ -273,5 +293,34 @@ impl HousingIO {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_valid_house_id, HousingIO};
+    use std::path::PathBuf;
+
+    #[test]
+    fn accepts_real_ids() {
+        assert!(is_valid_house_id("r-24_+07_1"));
+        assert!(is_valid_house_id("r+00_+00_12"));
+    }
+
+    #[test]
+    fn rejects_traversal_and_separators() {
+        assert!(!is_valid_house_id(""));
+        assert!(!is_valid_house_id(".."));
+        assert!(!is_valid_house_id("../../etc/passwd"));
+        assert!(!is_valid_house_id("foo/bar"));
+        assert!(!is_valid_house_id("foo.json"));
+        assert!(!is_valid_house_id(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn house_path_rejects_traversal() {
+        let io = HousingIO::new(PathBuf::from("/base"));
+        assert!(io.house_path(0, 0, "r+00_+00_1").is_ok());
+        assert!(io.house_path(0, 0, "../../etc/passwd").is_err());
     }
 }
