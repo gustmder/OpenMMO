@@ -17,7 +17,8 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 use super::{
-    is_valid_house_id, next_house_id, validate_house, world_to_chunk, HousingIO, CHUNK_SIZE,
+    is_valid_house_id, next_house_id, validate_house, validate_house_neighbors, world_to_chunk,
+    HousingIO, CHUNK_SIZE,
 };
 
 #[derive(Clone)]
@@ -80,12 +81,16 @@ async fn create_house(
     State(state): State<HousingRouteState>,
     Json(mut house): Json<HouseData>,
 ) -> Result<(StatusCode, Json<HouseData>), (StatusCode, String)> {
-    // Load neighbors for validation, then derive ID from loaded data
+    // Shape/bounds validation must precede the neighbor chunk scan (F-010)
+    if let Err(msg) = validate_house(&house) {
+        return Err((StatusCode::BAD_REQUEST, msg));
+    }
+
     let neighbors = load_neighbors(&state.housing, &house).await?;
     let (cx, cz) = world_to_chunk(house.origin.x, house.origin.z);
     house.id = next_house_id(cx, cz, &neighbors);
 
-    if let Err(msg) = validate_house(&house, &neighbors) {
+    if let Err(msg) = validate_house_neighbors(&house, &neighbors) {
         return Err((StatusCode::BAD_REQUEST, msg));
     }
 
@@ -120,9 +125,13 @@ async fn update_house(
     }
     house.id = house_id;
 
+    if let Err(msg) = validate_house(&house) {
+        return Err((StatusCode::BAD_REQUEST, msg));
+    }
+
     let neighbors = load_neighbors(&state.housing, &house).await?;
 
-    if let Err(msg) = validate_house(&house, &neighbors) {
+    if let Err(msg) = validate_house_neighbors(&house, &neighbors) {
         return Err((StatusCode::BAD_REQUEST, msg));
     }
 

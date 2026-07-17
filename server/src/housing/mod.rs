@@ -1,20 +1,46 @@
 pub mod routes;
 
 use onlinerpg_shared::housing::{HouseData, RoomData, RoomType, MAX_FLOOR_LEVEL};
+use onlinerpg_shared::world::{WORLD_MAX_X, WORLD_MIN_X};
 use std::path::PathBuf;
 use tokio::fs;
 use tracing::{error, info};
 
 const MIN_ROOM_SIZE: u8 = 3;
 const MAX_ROOM_SIZE: u8 = 6;
+const MAX_ROOMS: usize = 32;
+const MAX_ROOM_OFFSET: i32 = 64;
 
-/// Validate a house before saving. Returns Ok(()) or an error message.
-pub fn validate_house(house: &HouseData, neighbors: &[HouseData]) -> Result<(), String> {
+/// Validate house shape and coordinates. Must run before `load_neighbors`,
+/// so it bounds every value that feeds the chunk scan (F-010).
+pub fn validate_house(house: &HouseData) -> Result<(), String> {
     if house.rooms.is_empty() {
         return Err("House must have at least one room".into());
     }
+    if house.rooms.len() > MAX_ROOMS {
+        return Err(format!("House must have at most {} rooms", MAX_ROOMS));
+    }
+
+    let origin = &house.origin;
+    if !origin.x.is_finite() || !origin.y.is_finite() || !origin.z.is_finite() {
+        return Err("House origin must be finite".into());
+    }
+    // Z shares the world's square extent even though only X wraps
+    if origin.x < WORLD_MIN_X
+        || origin.x >= WORLD_MAX_X
+        || origin.z < WORLD_MIN_X
+        || origin.z >= WORLD_MAX_X
+    {
+        return Err("House origin out of world bounds".into());
+    }
 
     for (i, room) in house.rooms.iter().enumerate() {
+        if room.local_x.abs() > MAX_ROOM_OFFSET || room.local_z.abs() > MAX_ROOM_OFFSET {
+            return Err(format!(
+                "Room {} local offset must be within ±{}",
+                i, MAX_ROOM_OFFSET
+            ));
+        }
         // Room size constraints (stairwells allow smaller sizes)
         let min_size = if room.room_type == RoomType::Stairwell {
             1
@@ -74,27 +100,6 @@ pub fn validate_house(house: &HouseData, neighbors: &[HouseData]) -> Result<(), 
         }
     }
 
-    // Check overlap with neighboring houses
-    for neighbor in neighbors {
-        if neighbor.id == house.id {
-            continue;
-        }
-        for (i, room) in house.rooms.iter().enumerate() {
-            for other in neighbor.rooms.iter() {
-                if rooms_overlap_world(
-                    room,
-                    house.origin.x,
-                    house.origin.z,
-                    other,
-                    neighbor.origin.x,
-                    neighbor.origin.z,
-                ) {
-                    return Err(format!("Room {} overlaps with a neighboring house", i));
-                }
-            }
-        }
-    }
-
     // Validate upper-floor rooms have full floor support from the floor below
     for (i, room) in house.rooms.iter().enumerate() {
         if room.floor_level == 0 {
@@ -127,6 +132,30 @@ pub fn validate_house(house: &HouseData, neighbors: &[HouseData]) -> Result<(), 
         }
     }
 
+    Ok(())
+}
+
+/// Check overlap against already-loaded neighboring houses.
+pub fn validate_house_neighbors(house: &HouseData, neighbors: &[HouseData]) -> Result<(), String> {
+    for neighbor in neighbors {
+        if neighbor.id == house.id {
+            continue;
+        }
+        for (i, room) in house.rooms.iter().enumerate() {
+            for other in neighbor.rooms.iter() {
+                if rooms_overlap_world(
+                    room,
+                    house.origin.x,
+                    house.origin.z,
+                    other,
+                    neighbor.origin.x,
+                    neighbor.origin.z,
+                ) {
+                    return Err(format!("Room {} overlaps with a neighboring house", i));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -341,8 +370,81 @@ impl HousingIO {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_house_id, HousingIO};
+    use super::{is_valid_house_id, validate_house, HousingIO, MAX_ROOMS, MAX_ROOM_OFFSET};
+    use onlinerpg_shared::housing::{HouseData, RoomData, WallConfig, WallVariant};
+    use onlinerpg_shared::Position;
     use std::path::PathBuf;
+
+    fn walls(n: usize) -> Vec<WallConfig> {
+        vec![
+            WallConfig {
+                variant: WallVariant::Solid,
+                texture: 0,
+                is_open: false,
+            };
+            n
+        ]
+    }
+
+    fn room_at(local_x: i32, local_z: i32) -> RoomData {
+        RoomData {
+            room_type: Default::default(),
+            roof_type: Default::default(),
+            roof_ridge_dir: Default::default(),
+            stair_reversed: false,
+            local_x,
+            local_z,
+            size_x: 3,
+            size_z: 3,
+            floor_level: 0,
+            floor_texture: 0,
+            roof_texture: 0,
+            wall_height: 3.0,
+            wall_north: walls(3),
+            wall_south: walls(3),
+            wall_east: walls(3),
+            wall_west: walls(3),
+        }
+    }
+
+    fn house_at(x: f32, z: f32, rooms: Vec<RoomData>) -> HouseData {
+        HouseData {
+            id: "r+00_+00_1".into(),
+            owner_id: "test".into(),
+            origin: Position { x, y: 0.0, z },
+            rooms,
+            passability: vec![],
+        }
+    }
+
+    #[test]
+    fn accepts_valid_house() {
+        assert!(validate_house(&house_at(10.0, 10.0, vec![room_at(0, 0)])).is_ok());
+    }
+
+    #[test]
+    fn rejects_room_offset_out_of_bounds() {
+        let too_far = MAX_ROOM_OFFSET + 1;
+        assert!(validate_house(&house_at(10.0, 10.0, vec![room_at(too_far, 0)])).is_err());
+        assert!(validate_house(&house_at(10.0, 10.0, vec![room_at(0, -too_far)])).is_err());
+        assert!(validate_house(&house_at(10.0, 10.0, vec![room_at(i32::MAX, i32::MIN)])).is_err());
+    }
+
+    #[test]
+    fn rejects_origin_out_of_world() {
+        assert!(validate_house(&house_at(1e9, 0.0, vec![room_at(0, 0)])).is_err());
+        assert!(validate_house(&house_at(0.0, -1e9, vec![room_at(0, 0)])).is_err());
+        assert!(validate_house(&house_at(f32::NAN, 0.0, vec![room_at(0, 0)])).is_err());
+        assert!(validate_house(&house_at(f32::INFINITY, 0.0, vec![room_at(0, 0)])).is_err());
+    }
+
+    #[test]
+    fn rejects_too_many_rooms() {
+        let rooms = (0..=MAX_ROOMS as i32)
+            .map(|i| room_at(0, i * 4 - 64))
+            .collect();
+        assert!(validate_house(&house_at(10.0, 10.0, rooms)).is_err());
+    }
 
     #[test]
     fn accepts_real_ids() {
