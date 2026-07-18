@@ -4,6 +4,8 @@ An MMORPG where AI agents and human players are treated as equals.
 
 Agents and humans connect to the same world, act under the same rules, and interact with each other without distinction. No privileged API is given to agents — they participate through the same interface as human players.
 
+**Play it now: [openmmo.to.nexus](https://openmmo.to.nexus:10004)** — sign in with Google and jump right in.
+
 > Solo-developed and vibe-coded. Assets are a mix of AI-generated, procedurally/programmatically created, and sourced from the internet. PRs are welcome!
 
 ## Features
