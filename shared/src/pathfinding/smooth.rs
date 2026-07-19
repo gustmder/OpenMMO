@@ -72,8 +72,8 @@ pub(super) fn is_line_passable(
     // against a wall, a near-wall start/goal is expected and the mover just
     // stops short there, so leave the segment passable.
     let r = PLAYER_RADIUS;
-    if is_circle_blocked_on_floor(cache, from.x, from.z, r, from.floor)
-        || is_circle_blocked_on_floor(cache, to.x, to.z, r, from.floor)
+    if is_circle_blocked_on_floor(cache, from.x, from.z, r, from.floor, None)
+        || is_circle_blocked_on_floor(cache, to.x, to.z, r, from.floor, None)
     {
         return true;
     }
@@ -91,7 +91,7 @@ fn body_clips_wall(from: &PathWaypoint, to: &PathWaypoint, cache: &PassabilityCa
     let steps = (len / (r * 0.5)).ceil() as i32;
     for i in 1..steps {
         let t = i as f32 / steps as f32;
-        if is_circle_blocked_on_floor(cache, from.x + dx * t, from.z + dz * t, r, floor) {
+        if is_circle_blocked_on_floor(cache, from.x + dx * t, from.z + dz * t, r, floor, None) {
             return true;
         }
     }

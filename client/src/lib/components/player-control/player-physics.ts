@@ -15,6 +15,9 @@ export interface PlayerPhysicsDeps {
   getCurrentPlayerY: () => number | null
   /** Live read — housing floor offset above ground. */
   getFloorOffset: () => number
+  /** Live read — passability floor index the player is keyed to. Housing and
+   *  dungeon collision select their grid by this, not by Y. */
+  getPassabilityFloor: () => number
 }
 
 export interface PlayerPhysics {
@@ -65,17 +68,23 @@ export function createPlayerPhysics(deps: PlayerPhysicsDeps): PlayerPhysics {
     toZ: number,
     y: number
   ): boolean {
-    if (housingManager.isMovementBlocked(fromX, fromZ, toX, toZ, y)) return true
+    // Bridges still key off Y — they are decks in open air, not floors of a
+    // structure with a grid per level.
+    const floor = deps.getPassabilityFloor()
+    if (housingManager.isMovementBlocked(fromX, fromZ, toX, toZ, floor, y))
+      return true
     if (bridgeManager.isMovementBlocked(fromX, fromZ, toX, toZ, y)) return true
     // Surface dungeon entrance walls (and the shut door) seal the stair hole.
     // Shut interior doors need no check here — they're sealed into the wasm
     // passability cells like walls.
     if (dungeonManager.entranceBlocksMovement(fromX, fromZ, toX, toZ))
       return true
-    if (housingManager.isCircleBlocked(toX, toZ, PLAYER_RADIUS, y)) {
+    if (housingManager.isCircleBlocked(toX, toZ, PLAYER_RADIUS, floor, y)) {
       // Allow movement when the source is already overlapping a wall (e.g.
       // spawn next to a freshly placed editor wall) so the player can escape.
-      if (!housingManager.isCircleBlocked(fromX, fromZ, PLAYER_RADIUS, y)) {
+      if (
+        !housingManager.isCircleBlocked(fromX, fromZ, PLAYER_RADIUS, floor, y)
+      ) {
         return true
       }
     }

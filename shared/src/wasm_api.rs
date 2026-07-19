@@ -210,14 +210,17 @@ pub fn passability_is_movement_blocked(
     from_z: f32,
     to_x: f32,
     to_z: f32,
+    floor_level: u8,
     y: f32,
 ) -> bool {
-    with_cache(|c| pathfinding::is_movement_blocked(c, from_x, from_z, to_x, to_z, y))
+    with_cache(|c| {
+        pathfinding::is_movement_blocked(c, from_x, from_z, to_x, to_z, floor_level, Some(y))
+    })
 }
 
 #[wasm_bindgen]
-pub fn passability_is_circle_blocked(x: f32, z: f32, r: f32, y: f32) -> bool {
-    with_cache(|c| pathfinding::is_circle_blocked(c, x, z, r, y))
+pub fn passability_is_circle_blocked(x: f32, z: f32, r: f32, floor_level: u8, y: f32) -> bool {
+    with_cache(|c| pathfinding::is_circle_blocked_on_floor(c, x, z, r, floor_level, Some(y)))
 }
 
 #[wasm_bindgen]

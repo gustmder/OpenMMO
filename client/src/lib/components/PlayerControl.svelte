@@ -167,6 +167,7 @@
     getHeightManager: () => heightManager,
     getCurrentPlayerY: () => currentPlayer?.position.y ?? null,
     getFloorOffset: () => floorOffset,
+    getPassabilityFloor: currentPassabilityFloor,
   })
   const { sampleHeight, isMovementBlocked, isUphillTooSteep } = physics
 

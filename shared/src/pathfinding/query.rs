@@ -86,14 +86,19 @@ pub fn is_cardinal_move_blocked(
     false
 }
 
-/// Check if movement from→to crosses any blocked cell edge.
+/// Check if movement from→to crosses any blocked cell edge on `floor_level`.
+///
+/// Floor indices are globally unique across the cache — housing uses 0..3 and
+/// dungeons start at `dungeon::DUNGEON_FLOOR_INDEX_BASE` — so an exact match is
+/// all it takes to keep a crypt's walls away from the houses above it.
 pub fn is_movement_blocked(
     cache: &PassabilityCache,
     from_x: f32,
     from_z: f32,
     to_x: f32,
     to_z: f32,
-    y: f32,
+    floor_level: u8,
+    y: Option<f32>,
 ) -> bool {
     let min_x = from_x.min(to_x);
     let max_x = from_x.max(to_x);
@@ -106,18 +111,15 @@ pub fn is_movement_blocked(
         }
 
         // A stairwell is stored in *both* connected floors' grids with opposite
-        // ends sealed, so picking one grid by Y traps anyone whose Y has drifted
-        // to the wrong side, or who sits in the band where the two windows
-        // overlap: the floor they are not on seals the end they stand on. That
-        // is unrecoverable — a blocked step never moves them, so their Y never
-        // changes either. Inside a stairwell, consult both floors and block only
-        // when both refuse.
-        let stair_mask = stairwell_floor_mask(rp, min_x, max_x, min_z, max_z, y);
+        // ends sealed, so whichever grid the mover is keyed to seals the end
+        // they are standing on. Consult both and block only when both refuse.
+        let stair_mask = stairwell_floor_mask(rp, min_x, max_x, min_z, max_z, floor_level);
         if stair_mask != 0 {
             let mut connected = rp
                 .floors
                 .iter()
                 .filter(|f| stair_mask & floor_bit(f.floor_level) != 0)
+                .filter(|f| obstacle_reaches_y(f, y))
                 .peekable();
             if connected.peek().is_some()
                 && connected.all(|f| move_blocked_on_floor(rp, f, from_x, from_z, to_x, to_z))
@@ -128,7 +130,7 @@ pub fn is_movement_blocked(
         }
 
         for floor in &rp.floors {
-            if !floor_contains_y(floor, y) {
+            if floor.floor_level != floor_level || !obstacle_reaches_y(floor, y) {
                 continue;
             }
             if move_blocked_on_floor(rp, floor, from_x, from_z, to_x, to_z) {
@@ -144,50 +146,51 @@ fn floor_bit(floor_level: u8) -> u32 {
     1u32 << floor_level.min(31)
 }
 
-/// The Y band a floor grid answers for. The 0.5 m of slack below `y_base`
-/// absorbs the mover sitting slightly under the floor plane.
+/// Whether an obstacle on `floor` is tall enough to reach a mover at `y`.
+///
+/// Floor level says *which storey*; this says whether the thing on it actually
+/// reaches you. Walls span the storey, but furniture is only
+/// `FURNITURE_BLOCK_HEIGHT` tall, and a staircase runs above the floor it
+/// stands on — so someone mid-stairs must clear the tables below them.
+///
+/// Deliberately one-sided: an equivalent lower bound is what used to trap
+/// players at the foot of a stairwell, because a blocked step never moves them
+/// and so never corrects the Y that blocked it. `None` means "no Y known"
+/// (path smoothing) and conservatively applies every obstacle on the floor.
 #[inline]
-fn floor_contains_y(floor: &RuntimeFloorGrid, y: f32) -> bool {
-    y >= floor.y_base - 0.5 && y < floor.y_base + floor.wall_height
+fn obstacle_reaches_y(floor: &RuntimeFloorGrid, y: Option<f32>) -> bool {
+    match y {
+        Some(y) => y < floor.y_base + floor.wall_height,
+        None => true,
+    }
 }
 
-/// Bitmask of floor levels connected by any stairwell this move touches, or 0
-/// when the move has nothing to do with a stairwell. Touching (rather than
+/// Bitmask of floor levels connected by a stairwell this move touches that the
+/// mover is actually keyed to, or 0 otherwise. Touching (rather than
 /// containment) is what matters: stepping off a landing into the adjoining room
 /// is exactly the move the other floor's grid seals.
-///
-/// `y` is matched against the *union* of the connected floors' windows: loose
-/// enough that drifting between the two ends of a stairwell never trips it,
-/// tight enough that a dungeon whose AABB spans a whole neighbourhood cannot
-/// claim a player walking a house on the surface above it.
 fn stairwell_floor_mask(
     rp: &super::RuntimePassability,
     min_x: f32,
     max_x: f32,
     min_z: f32,
     max_z: f32,
-    y: f32,
+    floor_level: u8,
 ) -> u32 {
     if rp.stairwells.is_empty() {
         return 0;
     }
     let mut mask = 0;
     for stair in &rp.stairwells {
+        if stair.lower_floor != floor_level && stair.upper_floor != floor_level {
+            continue;
+        }
         let sx0 = rp.house_origin_x + stair.local_min_x as f32;
         let sx1 = rp.house_origin_x + stair.local_max_x as f32;
         let sz0 = rp.house_origin_z + stair.local_min_z as f32;
         let sz1 = rp.house_origin_z + stair.local_max_z as f32;
-        if !(max_x >= sx0 && min_x <= sx1 && max_z >= sz0 && min_z <= sz1) {
-            continue;
-        }
-        let bits = floor_bit(stair.lower_floor) | floor_bit(stair.upper_floor);
-        let spans_y = rp
-            .floors
-            .iter()
-            .filter(|f| bits & floor_bit(f.floor_level) != 0)
-            .any(|f| floor_contains_y(f, y));
-        if spans_y {
-            mask |= bits;
+        if max_x >= sx0 && min_x <= sx1 && max_z >= sz0 && min_z <= sz1 {
+            mask |= floor_bit(stair.lower_floor) | floor_bit(stair.upper_floor);
         }
     }
     mask
@@ -224,84 +227,96 @@ fn move_blocked_on_floor(
     )
 }
 
-/// Check if a circle of radius `r` at `(x, z)` overlaps any blocking wall
-/// edge. Used to enforce player thickness so the character stops short of
-/// walls instead of embedding into them. Selects floors by Y height — for a
-/// floor-level-keyed check (e.g. path smoothing) see `is_circle_blocked_on_floor`.
-pub fn is_circle_blocked(cache: &PassabilityCache, x: f32, z: f32, r: f32, y: f32) -> bool {
-    circle_blocked(cache, x, z, r, |floor| floor_contains_y(floor, y))
-}
-
-/// Like `is_circle_blocked` but selects floors by `floor_level` instead of Y.
-/// Path smoothing works in floor-level space (no Y), so this mirrors the
-/// runtime circle test the continuous mover applies at each step, letting the
-/// smoother reject diagonals whose interior would clip a wall corner the body
-/// radius can't clear.
+/// Check if a circle of radius `r` at `(x, z)` overlaps any blocking wall edge
+/// on `floor_level`. Enforces player thickness so the character stops short of
+/// walls instead of embedding into them, and lets path smoothing reject
+/// diagonals whose interior would clip a corner the body radius can't clear.
 pub fn is_circle_blocked_on_floor(
     cache: &PassabilityCache,
     x: f32,
     z: f32,
     r: f32,
     floor_level: u8,
+    y: Option<f32>,
 ) -> bool {
-    circle_blocked(cache, x, z, r, |floor| floor.floor_level == floor_level)
-}
-
-/// Shared body of the circle-vs-wall test, parameterised by how floors are
-/// matched (by Y range or by floor level).
-fn circle_blocked(
-    cache: &PassabilityCache,
-    x: f32,
-    z: f32,
-    r: f32,
-    floor_matches: impl Fn(&RuntimeFloorGrid) -> bool,
-) -> bool {
-    let r2 = r * r;
     for rp in cache.values() {
         if x + r < rp.min_x || x - r > rp.max_x || z + r < rp.min_z || z - r > rp.max_z {
             continue;
         }
+
+        // Same two-floor rule the edge check uses. Each floor's grid seals the
+        // stairwell end it does not own, and the body radius sits right on that
+        // seal whenever the mover reaches that end — so a landing would wall
+        // itself off from the floor keyed to the far end.
+        let stair_mask = stairwell_floor_mask(rp, x - r, x + r, z - r, z + r, floor_level);
+        if stair_mask != 0 {
+            let mut connected = rp
+                .floors
+                .iter()
+                .filter(|f| stair_mask & floor_bit(f.floor_level) != 0)
+                .filter(|f| obstacle_reaches_y(f, y))
+                .peekable();
+            if connected.peek().is_some()
+                && connected.all(|f| circle_blocked_on_grid(rp, f, x, z, r))
+            {
+                return true;
+            }
+            continue;
+        }
+
         for floor in &rp.floors {
-            if !floor_matches(floor) {
+            if floor.floor_level == floor_level
+                && obstacle_reaches_y(floor, y)
+                && circle_blocked_on_grid(rp, floor, x, z, r)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether a circle at `(x, z)` clips a blocking edge on one specific grid.
+fn circle_blocked_on_grid(
+    rp: &super::RuntimePassability,
+    floor: &RuntimeFloorGrid,
+    x: f32,
+    z: f32,
+    r: f32,
+) -> bool {
+    let r2 = r * r;
+    let local_x = x - rp.house_origin_x - floor.origin_x as f32;
+    let local_z = z - rp.house_origin_z - floor.origin_z as f32;
+    let w = floor.width as i32;
+    let d = floor.depth as i32;
+    let min_cx = ((local_x - r).floor() as i32).max(0);
+    let max_cx = ((local_x + r).floor() as i32).min(w - 1);
+    let min_cz = ((local_z - r).floor() as i32).max(0);
+    let max_cz = ((local_z + r).floor() as i32).min(d - 1);
+    for cz in min_cz..=max_cz {
+        for cx in min_cx..=max_cx {
+            let cell = floor.cells[(cx + cz * w) as usize];
+            if cell == 0 {
                 continue;
             }
-            let local_x = x - rp.house_origin_x - floor.origin_x as f32;
-            let local_z = z - rp.house_origin_z - floor.origin_z as f32;
-            let w = floor.width as i32;
-            let d = floor.depth as i32;
-            let min_cx = ((local_x - r).floor() as i32).max(0);
-            let max_cx = ((local_x + r).floor() as i32).min(w - 1);
-            let min_cz = ((local_z - r).floor() as i32).max(0);
-            let max_cz = ((local_z + r).floor() as i32).min(d - 1);
-            for cz in min_cz..=max_cz {
-                for cx in min_cx..=max_cx {
-                    let cell = floor.cells[(cx + cz * w) as usize];
-                    if cell == 0 {
-                        continue;
-                    }
-                    let cx_f = cx as f32;
-                    let cz_f = cz as f32;
-                    if cell & EDGE_N != 0
-                        && unit_segment_dist_sq(local_x, local_z, cx_f, cz_f, true) < r2
-                    {
-                        return true;
-                    }
-                    if cell & EDGE_S != 0
-                        && unit_segment_dist_sq(local_x, local_z, cx_f, cz_f + 1.0, true) < r2
-                    {
-                        return true;
-                    }
-                    if cell & EDGE_W != 0
-                        && unit_segment_dist_sq(local_x, local_z, cx_f, cz_f, false) < r2
-                    {
-                        return true;
-                    }
-                    if cell & EDGE_E != 0
-                        && unit_segment_dist_sq(local_x, local_z, cx_f + 1.0, cz_f, false) < r2
-                    {
-                        return true;
-                    }
-                }
+            let cx_f = cx as f32;
+            let cz_f = cz as f32;
+            if cell & EDGE_N != 0 && unit_segment_dist_sq(local_x, local_z, cx_f, cz_f, true) < r2 {
+                return true;
+            }
+            if cell & EDGE_S != 0
+                && unit_segment_dist_sq(local_x, local_z, cx_f, cz_f + 1.0, true) < r2
+            {
+                return true;
+            }
+            if cell & EDGE_W != 0 && unit_segment_dist_sq(local_x, local_z, cx_f, cz_f, false) < r2
+            {
+                return true;
+            }
+            if cell & EDGE_E != 0
+                && unit_segment_dist_sq(local_x, local_z, cx_f + 1.0, cz_f, false) < r2
+            {
+                return true;
             }
         }
     }

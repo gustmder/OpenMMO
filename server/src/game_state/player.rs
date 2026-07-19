@@ -534,7 +534,7 @@ impl super::GameState {
                         )
                     };
                     // Edge-crossing subset of the client's continuous-mover
-                    // check (no body radius, at the mover's current Y). A
+                    // check (no body radius, on the leg's own floor). A
                     // blocked step stops the player and drops the queue.
                     if intent.check_collision
                         && super::passability::is_wrapped_movement_blocked(
@@ -543,6 +543,7 @@ impl super::GameState {
                             player.position.z,
                             step_x,
                             step_z,
+                            super::passability::authoritative_floor(&cache, &player.position),
                             player.position.y,
                         )
                     {

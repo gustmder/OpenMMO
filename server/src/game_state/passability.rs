@@ -37,9 +37,10 @@ pub(super) fn is_wrapped_movement_blocked(
     from_z: f32,
     to_x: f32,
     to_z: f32,
+    floor_level: u8,
     y: f32,
 ) -> bool {
-    if pathfinding::is_movement_blocked(cache, from_x, from_z, to_x, to_z, y) {
+    if pathfinding::is_movement_blocked(cache, from_x, from_z, to_x, to_z, floor_level, Some(y)) {
         return true;
     }
 
@@ -56,8 +57,23 @@ pub(super) fn is_wrapped_movement_blocked(
         from_z,
         to_x + seam_offset,
         to_z,
-        y,
+        floor_level,
+        Some(y),
     )
+}
+
+/// Cache floor index for a player, derived from the server's own position
+/// rather than the floor the client reported.
+///
+/// `validated_dungeon_floor` waves through any non-negative floor, so a client
+/// claiming floor 0 from three storeys underground would otherwise pick which
+/// walls apply to it and walk straight through the dungeon. Position is
+/// server-simulated, so deriving from it keeps collision authoritative.
+pub(super) fn authoritative_floor(
+    cache: &pathfinding::PassabilityCache,
+    position: &crate::types::Position,
+) -> u8 {
+    pathfinding::get_floor_at_position(cache, position.x, position.z, position.y)
 }
 
 impl super::GameState {

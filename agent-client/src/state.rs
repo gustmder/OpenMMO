@@ -828,8 +828,8 @@ impl SharedState {
             let x = center.x + angle.cos() * dist;
             let z = center.z + angle.sin() * dist;
 
-            // Reject if inside a house
-            if pathfinding::is_movement_blocked(world.passability_cache(), x, z, x, z, 0.0) {
+            // Reject if inside a house (bots roam the surface only)
+            if pathfinding::is_movement_blocked(world.passability_cache(), x, z, x, z, 0, None) {
                 continue;
             }
 

@@ -253,21 +253,37 @@ export class HousingManager {
   }
 
   /**
-   * Check if movement from→to crosses any blocked cell edge.
+   * Check if movement from→to crosses any blocked cell edge. `floorLevel` is
+   * the passability floor index (see `dungeonManager.passabilityFloor`), not
+   * the wire floor.
    */
   isMovementBlocked(
     fromX: number,
     fromZ: number,
     toX: number,
     toZ: number,
+    floorLevel: number,
     y: number
   ): boolean {
-    return passability_is_movement_blocked(fromX, fromZ, toX, toZ, y)
+    return passability_is_movement_blocked(
+      fromX,
+      fromZ,
+      toX,
+      toZ,
+      floorLevel,
+      y
+    )
   }
 
   /** Check if a circle of radius r at (x, z) overlaps any blocking wall. */
-  isCircleBlocked(x: number, z: number, r: number, y: number): boolean {
-    return passability_is_circle_blocked(x, z, r, y)
+  isCircleBlocked(
+    x: number,
+    z: number,
+    r: number,
+    floorLevel: number,
+    y: number
+  ): boolean {
+    return passability_is_circle_blocked(x, z, r, floorLevel, y)
   }
 
   /** Update local cache without server call (triggers geometry rebuild). */

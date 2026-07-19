@@ -28,7 +28,7 @@ pub use cache::{
     FurniturePiece,
 };
 pub use query::{
-    get_floor_at_position, get_floor_y_base, is_cardinal_move_blocked, is_circle_blocked,
+    get_floor_at_position, get_floor_y_base, is_cardinal_move_blocked, is_circle_blocked_on_floor,
     is_movement_blocked,
 };
 pub use smooth::find_and_smooth_path;
@@ -229,20 +229,37 @@ mod tests {
         cache.insert("furniture:test".to_string(), rp);
 
         // Walking into the sealed cell from the north is blocked...
-        assert!(is_movement_blocked(&cache, 5.5, 4.5, 5.5, 5.5, 0.0));
+        assert!(is_movement_blocked(&cache, 5.5, 4.5, 5.5, 5.5, 0, None));
         // ...and from the west, too.
-        assert!(is_movement_blocked(&cache, 4.5, 5.5, 5.5, 5.5, 0.0));
+        assert!(is_movement_blocked(&cache, 4.5, 5.5, 5.5, 5.5, 0, None));
         // A parallel move that never enters the cell is allowed.
-        assert!(!is_movement_blocked(&cache, 0.5, 0.5, 1.5, 0.5, 0.0));
+        assert!(!is_movement_blocked(&cache, 0.5, 0.5, 1.5, 0.5, 0, None));
 
         // Body radius keeps the character from hugging the furniture.
-        assert!(is_circle_blocked(&cache, 5.5, 4.85, 0.3, 0.0));
+        assert!(is_circle_blocked_on_floor(&cache, 5.5, 4.85, 0.3, 0, None));
 
-        // The Y-gate confines blocking to near the furniture's level: a player
-        // 1.5m above it — descending a stairwell whose steps pass over the
-        // furniture, or standing a floor up — passes freely.
-        assert!(!is_movement_blocked(&cache, 5.5, 4.5, 5.5, 5.5, 1.5));
-        assert!(!is_movement_blocked(&cache, 5.5, 4.5, 5.5, 5.5, 3.2));
+        // Blocking is confined to the furniture's own floor: someone a storey
+        // up walks over it freely.
+        assert!(!is_movement_blocked(&cache, 5.5, 4.5, 5.5, 5.5, 1, None));
+
+        // Height matters as well as floor. A staircase runs above the floor it
+        // stands on, so a climber is keyed to floor 0 while several metres up —
+        // a 1 m table must not block them, nor snag their body radius.
+        let above = Some(3.69);
+        assert!(!is_movement_blocked(&cache, 5.5, 4.5, 5.5, 5.5, 0, above));
+        assert!(!is_circle_blocked_on_floor(
+            &cache, 5.5, 4.85, 0.3, 0, above
+        ));
+        // Standing on the floor itself, it blocks as before.
+        assert!(is_movement_blocked(
+            &cache,
+            5.5,
+            4.5,
+            5.5,
+            5.5,
+            0,
+            Some(0.5)
+        ));
 
         // A* routes around the sealed cell instead of through it.
         assert!(is_cardinal_move_blocked(&cache, 5, 4, 0, 1, 0));
@@ -650,10 +667,9 @@ mod tests {
         ("house".to_string(), rp)
     }
 
-    /// Y=3.2 sits in the upper floor's window only (lower ends at 3.0), so
-    /// before the stairwell rule this move saw just the upper grid, which seals
-    /// the landing — and since a blocked step never moves the player, their Y
-    /// never corrected either. Permanently stuck at the foot of the stairs.
+    /// A player keyed to the upper floor while standing on the bottom landing —
+    /// the grid that seals the end they are on. Without the two-floor rule a
+    /// blocked step never moves them, so nothing ever corrects it.
     #[test]
     fn stairwell_exit_allowed_when_the_other_connected_floor_allows() {
         let (id, rp) = make_stairwell_house(false, true);
@@ -661,7 +677,7 @@ mod tests {
         cache.insert(id, rp);
 
         assert!(
-            !query::is_movement_blocked(&cache, 1.5, 1.5, 1.5, 2.5, 3.2),
+            !query::is_movement_blocked(&cache, 1.5, 1.5, 1.5, 2.5, 1, None),
             "stepping off the bottom landing must stay open while the lower floor allows it"
         );
     }
@@ -673,23 +689,27 @@ mod tests {
         cache.insert(id, rp);
 
         assert!(
-            query::is_movement_blocked(&cache, 1.5, 1.5, 1.5, 2.5, 3.2),
+            query::is_movement_blocked(&cache, 1.5, 1.5, 1.5, 2.5, 1, None),
             "a genuinely walled stairwell exit must still block"
         );
     }
 
     /// The relaxation is scoped to stairwell footprints: an ordinary wall one
-    /// column over is still selected by Y alone and still blocks.
+    /// column over is keyed to the mover's floor alone and still blocks.
     #[test]
-    fn non_stairwell_wall_still_blocks_by_y_window() {
+    fn non_stairwell_wall_still_blocks_on_the_movers_floor() {
         let (id, mut rp) = make_stairwell_house(false, false);
         rp.floors[1].cells[2] |= EDGE_S; // cell (0,1), outside the stairwell
         let mut cache = PassabilityCache::new();
         cache.insert(id, rp);
 
         assert!(
-            query::is_movement_blocked(&cache, 0.5, 1.5, 0.5, 2.5, 3.2),
-            "a normal wall on the floor matching the mover's Y must block"
+            query::is_movement_blocked(&cache, 0.5, 1.5, 0.5, 2.5, 1, None),
+            "a normal wall on the mover's own floor must block"
+        );
+        assert!(
+            !query::is_movement_blocked(&cache, 0.5, 1.5, 0.5, 2.5, 0, None),
+            "...and must not reach the floor below it"
         );
     }
 }
@@ -768,7 +788,8 @@ mod real_house_repro {
 
     /// `old_crypt`, whose AABB is an 80 m square swallowing a whole block of
     /// Aldermark — including the house above. Every cell walls off every side,
-    /// and one of its 19 stairwells sits directly under the house.
+    /// and one of its stairwells sits directly under the house. Its floors carry
+    /// real dungeon indices, which is what keeps them off housing's 0..3.
     fn dungeon_under_the_house() -> (String, RuntimePassability) {
         let (w, d) = (80usize, 80usize);
         let grid = |floor_level: u8, y_base: f32| RuntimeFloorGrid {
@@ -788,15 +809,18 @@ mod real_house_repro {
             max_x: -1410.0,
             min_z: 4680.0,
             max_z: 4760.0,
-            floors: vec![grid(0, -30.0), grid(1, -26.9)],
+            floors: vec![
+                grid(crate::dungeon::passability_floor_for_depth(1), -30.0),
+                grid(crate::dungeon::passability_floor_for_depth(2), -26.9),
+            ],
             // World x -1470..-1466, z 4730..4734 — squarely under the house.
             stairwells: vec![StairwellInfo {
                 local_min_x: 20,
                 local_min_z: 50,
                 local_max_x: 24,
                 local_max_z: 54,
-                lower_floor: 0,
-                upper_floor: 1,
+                lower_floor: crate::dungeon::passability_floor_for_depth(1),
+                upper_floor: crate::dungeon::passability_floor_for_depth(2),
                 along_z: true,
                 reversed: false,
             }],
@@ -804,12 +828,12 @@ mod real_house_repro {
         ("dungeon:old_crypt".to_string(), rp)
     }
 
-    /// The stairwell relaxation consults both connected floors *without* a Y
-    /// window — correct inside one building, catastrophic across a dungeon 30 m
-    /// down whose footprint covers the surface. Walking west on the house's
-    /// second floor was blocked by a buried crypt wall.
+    /// Collision once inferred the floor from Y, which put a player on the
+    /// house's 2F inside the crypt's Y-blind stairwell rule and walled off a
+    /// westward walk. Keying on the floor index makes the two spaces disjoint
+    /// by construction — housing owns 0..3, dungeons start well above it.
     #[test]
-    fn dungeon_stairwell_below_does_not_block_the_surface_house() {
+    fn dungeon_below_cannot_block_the_surface_house() {
         let mut cache = PassabilityCache::new();
         let (id, rp) = real_house();
         cache.insert(id, rp);
@@ -817,21 +841,52 @@ mod real_house_repro {
         cache.insert(did, drp);
 
         assert!(
-            !query::is_movement_blocked(&cache, -1468.0, 4732.45, -1468.05, 4732.45, 4.21),
-            "a dungeon stairwell 30 m below must not wall off the house above it"
+            !query::is_movement_blocked(&cache, -1468.0, 4732.45, -1468.05, 4732.45, 1, None),
+            "a dungeon 30 m below must not wall off the house above it"
         );
     }
 
-    /// The Y gate must not be so tight that it undoes the original fix: down in
-    /// the crypt, on the stairwell itself, both floors still get consulted.
+    /// Descending 2F→1F. The stairwell is grid column cx=9; its bottom landing
+    /// (cz=3, reversed stairs) is cell 14 = E|S|W on floor 1 — floor 1 seals the
+    /// end it does not own. The edge check survives that via the two-floor rule,
+    /// but the body radius sits right on the seal, so the circle check needs the
+    /// same rule or the player is walled in at the foot of the stairs.
     #[test]
-    fn dungeon_stairwell_still_relaxes_at_its_own_depth() {
+    fn body_radius_clears_the_stairwell_end_the_keyed_floor_seals() {
+        let (id, rp) = real_house();
+        let mut cache = PassabilityCache::new();
+        cache.insert(id, rp);
+
+        // Keyed to floor 1, stepping west off the bottom landing.
+        assert!(
+            !query::is_circle_blocked_on_floor(&cache, -1467.1, 4735.5, 0.3, 1, None),
+            "floor 1's seal on the bottom landing must not trap the body radius"
+        );
+        // The outer east wall is walled on both floors and must still stop it.
+        assert!(
+            query::is_circle_blocked_on_floor(&cache, -1466.1, 4735.5, 0.3, 1, None),
+            "a wall both connected floors agree on must still block the body"
+        );
+    }
+
+    /// The disjointness must not be bought by making the dungeon toothless:
+    /// down in the crypt, on its own floor, every wall still blocks.
+    #[test]
+    fn dungeon_still_blocks_on_its_own_floor() {
         let mut cache = PassabilityCache::new();
         let (did, drp) = dungeon_under_the_house();
         cache.insert(did, drp);
 
         assert!(
-            query::is_movement_blocked(&cache, -1468.0, 4732.45, -1468.05, 4732.45, -29.5),
+            query::is_movement_blocked(
+                &cache,
+                -1468.0,
+                4732.45,
+                -1468.05,
+                4732.45,
+                crate::dungeon::passability_floor_for_depth(1),
+                None,
+            ),
             "every cell is walled, so the move must still block at crypt depth"
         );
     }
