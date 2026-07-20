@@ -78,7 +78,7 @@ export class PlayerControlMachine {
 
     if (!options.editorMode) {
       this.handleInteractKey()
-      this.handleKeyboard()
+      this.handleKeyboard(deltaTime)
     }
 
     this.tick(deltaTime)
@@ -114,8 +114,8 @@ export class PlayerControlMachine {
     this.currentDefinition?.handleInteractKey?.()
   }
 
-  private handleKeyboard() {
-    this.currentDefinition?.handleKeyboard?.()
+  private handleKeyboard(deltaTime: number) {
+    this.currentDefinition?.handleKeyboard?.(deltaTime)
   }
 
   private tick(deltaTime: number) {

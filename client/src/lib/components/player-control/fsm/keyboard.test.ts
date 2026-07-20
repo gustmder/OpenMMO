@@ -16,6 +16,7 @@ function makeInput() {
     currentPos: { x: 0, y: 1, z: 0 },
     direction: { x: 1, z: 0 },
     config: DEFAULT_MOVEMENT_CONFIG,
+    deltaTimeSeconds: 1 / 64,
     sampleHeight: vi.fn((x: number, z: number) => x + z),
     isMovementBlocked: vi.fn(() => false),
     isUphillTooSteep: vi.fn(() => false),
@@ -63,6 +64,7 @@ const movementDeps = {
     deceleration: 6,
     arrivalThreshold: 0.05,
   },
+  deltaTimeSeconds: 1 / 64,
   sampleHeight: () => 0,
   isMovementBlocked: () => false,
   isUphillTooSteep: () => false,
@@ -71,18 +73,31 @@ const movementDeps = {
 }
 
 describe('applyKeyboardMovement', () => {
-  it('moves at fixed keyboard step and sends the new position', () => {
+  it('moves by maxSpeed × frame delta and sends the new position', () => {
     const input = makeInput()
 
     const outcome = applyKeyboardMovement(input)
 
     expect(outcome.kind).toBe('moved')
     expect(input.writePlayerPosition).toHaveBeenCalledWith(
-      { x: 0.025, y: 0.025, z: 0 },
+      { x: 0.046875, y: 0.046875, z: 0 },
       Math.PI / 2
     )
     expect(input.sendPlayerMove).toHaveBeenCalledWith(
-      { x: 0.025, y: 0.025, z: 0 },
+      { x: 0.046875, y: 0.046875, z: 0 },
+      Math.PI / 2
+    )
+  })
+
+  it('clamps oversized frame deltas to a 100ms step', () => {
+    const input = makeInput()
+    input.deltaTimeSeconds = 1
+
+    const outcome = applyKeyboardMovement(input)
+
+    expect(outcome.kind).toBe('moved')
+    expect(input.writePlayerPosition).toHaveBeenCalledWith(
+      { x: 3 * 0.1, y: 3 * 0.1, z: 0 },
       Math.PI / 2
     )
   })

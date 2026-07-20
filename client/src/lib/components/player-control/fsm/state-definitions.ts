@@ -12,7 +12,7 @@ export interface PlayerControlStateDefinition {
   exit?: () => void
   handleEvent?: (event: PlayerControlEvent) => boolean | void
   handleInteractKey?: () => boolean | void
-  handleKeyboard?: () => boolean | void
+  handleKeyboard?: (deltaTime: number) => boolean | void
   tick?: (deltaTime: number) => boolean | void
 }
 
@@ -87,9 +87,9 @@ function mergeStateOverrides(
         : undefined,
     handleKeyboard:
       previous.handleKeyboard || next.handleKeyboard
-        ? () =>
-            previous.handleKeyboard?.() === true ||
-            next.handleKeyboard?.() === true
+        ? (deltaTime) =>
+            previous.handleKeyboard?.(deltaTime) === true ||
+            next.handleKeyboard?.(deltaTime) === true
         : undefined,
     tick:
       previous.tick || next.tick
@@ -149,7 +149,7 @@ export function createAnimationEventStateOverrides({
 
 export interface FramePhaseStateActions {
   handleInteractKey: () => void
-  handleKeyboard: () => void
+  handleKeyboard: (deltaTime: number) => void
   tick: (deltaTime: number) => void
 }
 
@@ -177,8 +177,8 @@ export function createFramePhaseStateOverrides({
           handleInteractKey()
           return true
         },
-        handleKeyboard: () => {
-          handleKeyboard()
+        handleKeyboard: (deltaTime: number) => {
+          handleKeyboard(deltaTime)
           return true
         },
         tick: (deltaTime: number) => {

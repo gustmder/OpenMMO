@@ -106,7 +106,7 @@ export function createKeyboardTapTracker(): KeyboardTapTracker {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Keyboard movement integrator (fixed-step, no accel/decel/waypoints)
+// Keyboard movement integrator (delta-time step, no accel/decel/waypoints)
 // ───────────────────────────────────────────────────────────────────────────
 
 export interface KeyboardDirection {
@@ -118,6 +118,7 @@ interface KeyboardMovementInput {
   currentPos: Position
   direction: KeyboardDirection
   config: MovementConfig
+  deltaTimeSeconds: number
   sampleHeight: (x: number, z: number) => number
   isMovementBlocked: (
     fromX: number,
@@ -150,6 +151,7 @@ export function applyKeyboardMovement({
   currentPos,
   direction,
   config,
+  deltaTimeSeconds,
   sampleHeight,
   isMovementBlocked,
   isUphillTooSteep,
@@ -157,7 +159,8 @@ export function applyKeyboardMovement({
   sendPlayerMove,
 }: KeyboardMovementInput): KeyboardMovementOutcome {
   const currentSpeed = config.maxSpeed
-  const speed = config.maxSpeed * (1000 / 120 / 1000)
+  // Clamp tab-switch delta spikes so one frame can't teleport the player.
+  const speed = config.maxSpeed * Math.min(deltaTimeSeconds, 0.1)
   const newX = currentPos.x + direction.x * speed
   const newZ = currentPos.z + direction.z * speed
 
@@ -258,6 +261,7 @@ interface RunKeyboardFrameInput {
   isInCombat: boolean
   direction: KeyboardDirection | null
   config: MovementConfig
+  deltaTimeSeconds: number
   sampleHeight: (x: number, z: number) => number
   isMovementBlocked: (
     fromX: number,
@@ -287,6 +291,7 @@ export function runKeyboardFrame({
   isInCombat,
   direction,
   config,
+  deltaTimeSeconds,
   sampleHeight,
   isMovementBlocked,
   isUphillTooSteep,
@@ -342,6 +347,7 @@ export function runKeyboardFrame({
       },
       direction,
       config,
+      deltaTimeSeconds,
       sampleHeight,
       isMovementBlocked,
       isUphillTooSteep,

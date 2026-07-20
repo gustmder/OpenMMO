@@ -77,7 +77,7 @@ describe('composePlayerControlStateOverrides', () => {
       { idle: { handleKeyboard: third } }
     )
 
-    expect(overrides.idle?.handleKeyboard?.()).toBe(true)
+    expect(overrides.idle?.handleKeyboard?.(16)).toBe(true)
     expect(first).toHaveBeenCalledOnce()
     expect(second).toHaveBeenCalledOnce()
     expect(third).not.toHaveBeenCalled()
@@ -154,11 +154,11 @@ describe('createFramePhaseStateOverrides', () => {
     })
 
     expect(overrides.moving?.handleInteractKey?.()).toBe(true)
-    expect(overrides.moving?.handleKeyboard?.()).toBe(true)
+    expect(overrides.moving?.handleKeyboard?.(16)).toBe(true)
     expect(overrides.moving?.tick?.(16)).toBe(true)
 
     expect(handleInteractKey).toHaveBeenCalledOnce()
-    expect(handleKeyboard).toHaveBeenCalledOnce()
+    expect(handleKeyboard).toHaveBeenCalledExactlyOnceWith(16)
     expect(tick).toHaveBeenCalledWith(16)
   })
 })

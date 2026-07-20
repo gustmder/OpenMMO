@@ -729,7 +729,7 @@
     })
   }
 
-  function updateKeyboardMovement() {
+  function updateKeyboardMovement(deltaTime: number) {
     runKeyboardFrame({
       currentPlayer,
       hasKeysPressed: inputHandler.hasKeysPressed,
@@ -738,6 +738,7 @@
       isInCombat: combatController.isInCombat,
       direction: inputHandler.getMovementDirection(),
       config: MOVEMENT_CONFIG,
+      deltaTimeSeconds: deltaTime / 1000,
       sampleHeight,
       isMovementBlocked,
       isUphillTooSteep,

@@ -47,6 +47,22 @@ describe('PlayerControlMachine', () => {
     ])
   })
 
+  it('passes the frame delta to the keyboard phase', () => {
+    const handleKeyboard = vi.fn()
+    const machine = new PlayerControlMachine(
+      { dispatchEvent: vi.fn() },
+      {
+        states: createPlayerControlStateDefinitions({
+          idle: { handleKeyboard },
+        }),
+      }
+    )
+
+    machine.update(16, { editorMode: false })
+
+    expect(handleKeyboard).toHaveBeenCalledExactlyOnceWith(16)
+  })
+
   it('skips interact and keyboard phases in editor mode but still ticks', () => {
     const handleInteractKey = vi.fn()
     const handleKeyboard = vi.fn()
