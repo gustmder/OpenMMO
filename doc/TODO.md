@@ -94,6 +94,10 @@
 - party, guild 기능
 - 키보드로 움직이면 다른 플레이어에게는 움찔거리며 움직이는 것으로 보인다
 - 디버그창 일반인에게는 안 보이게
+- 클라이언트 높이 소스 일원화 (sampleHeight / waypointHeight)
+  - sampleHeight는 playerFloorOffset 스칼라(현재 위치), waypointHeight는 층 기준(임의 좌표)
+  - 새 호출부가 잘못된 쪽을 고르면 계단에서 y가 한 층 어긋나는 버그가 조용히 재발함
+  - playerFloorOffset의 유일한 소비자가 sampleHeight라 통합 여지 있음. 단 층 전환 히스테리시스 주의
 
 
 # 폐지
