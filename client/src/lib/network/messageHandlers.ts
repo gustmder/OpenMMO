@@ -44,7 +44,12 @@ import type {
 
 function mapBuyback(
   entries:
-    | { entry_id: number; item_def_id: string; enchant: number; price: number }[]
+    | {
+        entry_id: number
+        item_def_id: string
+        enchant: number
+        price: number
+      }[]
     | undefined
 ): BuybackEntry[] {
   return (entries ?? []).map((e) => ({
@@ -116,6 +121,15 @@ async function applyObjectInteraction(
   wx: number,
   wz: number
 ) {
+  // Pickup is an animation, not a placed object: it happens wherever the
+  // player is standing, so the placement search can only ever find nothing.
+  // Skipping it drops two awaits and a scan of every cached region before
+  // the crouch starts.
+  if (objectType === 'pickup') {
+    remotePlayerManager.handleInteraction(playerId, objectType, 0)
+    return
+  }
+
   await objectManager.fetchCatalog()
   const def = objectManager.getCatalogEntry(objectType)
   const anim = def?.interaction ?? objectType
