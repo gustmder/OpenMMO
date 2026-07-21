@@ -6,6 +6,7 @@ use onlinerpg_shared::messages::{BuybackEntry, DealKind, StockEntry};
 use tracing::info;
 
 use super::deals::{buy_price, deal_half_band_pct, resident_half_band_pct, sell_payout};
+use super::StoredBuyback;
 
 /// Maximum distance between player and trader for any shop interaction.
 const MAX_TRADE_DISTANCE: f32 = 6.0;
@@ -13,6 +14,11 @@ const MAX_TRADE_DISTANCE: f32 = 6.0;
 /// Most recent sold units kept per (player, merchant) for buyback; older
 /// entries are dropped oldest-first.
 const BUYBACK_CAP: usize = 10;
+
+/// How long a sold unit stays repurchasable. Long enough to cover finding out
+/// about a mis-sell later; a restart clears the map anyway, so this only binds
+/// on a long uptime, where it is what keeps the map from growing forever.
+const BUYBACK_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// How many `tick_shop_holds` ticks a single open trade window holds an NPC in
 /// place before its movement is released anyway. The tick runs on the server's
@@ -846,14 +852,26 @@ impl super::GameState {
         characters.get(player_id).map(|(char_id, _, _)| *char_id)
     }
 
+    /// Drop expired entries across every character, then any pair left
+    /// empty. Swept globally (not just the caller's pair) because an offline
+    /// character's entries would otherwise never be reached again.
+    async fn sweep_buybacks(&self, now_ms: u64) {
+        let mut buybacks = self.buybacks.write().await;
+        buybacks.retain(|_, list| {
+            list.retain(|stored| stored.expires_at_ms > now_ms);
+            !list.is_empty()
+        });
+    }
+
     async fn buyback_list(&self, player_id: &PlayerId, npc_name: &str) -> Vec<BuybackEntry> {
         let Some(char_id) = self.character_id_of(player_id).await else {
             return Vec::new();
         };
+        self.sweep_buybacks(Self::now_ms()).await;
         let buybacks = self.buybacks.read().await;
         buybacks
             .get(&(char_id, npc_name.to_string()))
-            .cloned()
+            .map(|list| list.iter().map(|stored| stored.entry.clone()).collect())
             .unwrap_or_default()
     }
 
@@ -869,19 +887,25 @@ impl super::GameState {
         let Some(char_id) = self.character_id_of(player_id).await else {
             return Vec::new();
         };
+        let now_ms = Self::now_ms();
+        self.sweep_buybacks(now_ms).await;
         let mut buybacks = self.buybacks.write().await;
         let list = buybacks.entry((char_id, npc_name.to_string())).or_default();
-        list.push(entry);
+        list.push(StoredBuyback {
+            entry,
+            expires_at_ms: now_ms + BUYBACK_TTL_MS,
+        });
         if list.len() > BUYBACK_CAP {
             list.remove(0);
         }
-        list.clone()
+        list.iter().map(|stored| stored.entry.clone()).collect()
     }
 
     /// Repurchase a unit previously sold to a merchant, at the exact payout
     /// the player received — the round trip is gold-neutral, so no money
     /// pump is possible in either direction. Entries are scoped to the
-    /// selling player and live in memory only, like `deals`.
+    /// selling character, live in memory only, and expire after
+    /// `BUYBACK_TTL_MS`.
     pub async fn buyback_item(
         &self,
         player_id: &PlayerId,
@@ -904,12 +928,14 @@ impl super::GameState {
             return;
         };
 
+        let now_ms = Self::now_ms();
+        self.sweep_buybacks(now_ms).await;
         let entry = {
             let buybacks = self.buybacks.read().await;
             buybacks
                 .get(&(char_id, npc_name.clone()))
-                .and_then(|list| list.iter().find(|e| e.entry_id == entry_id))
-                .cloned()
+                .and_then(|list| list.iter().find(|s| s.entry.entry_id == entry_id))
+                .map(|stored| stored.entry.clone())
         };
         let Some(entry) = entry else {
             return self
@@ -949,9 +975,11 @@ impl super::GameState {
             let taken = buybacks
                 .get_mut(&(char_id, npc_name.clone()))
                 .and_then(|list| {
-                    let idx = list.iter().position(|e| e.entry_id == entry_id)?;
+                    let idx = list
+                        .iter()
+                        .position(|s| s.entry.entry_id == entry_id && s.expires_at_ms > now_ms)?;
                     list.remove(idx);
-                    Some(list.clone())
+                    Some(list.iter().map(|s| s.entry.clone()).collect::<Vec<_>>())
                 });
             let Some(buyback) = taken else {
                 drop(buybacks);

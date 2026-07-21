@@ -1409,7 +1409,7 @@ async fn sell_to_merchant_records_buyback_and_restores_item() {
         let buybacks = game_state.buybacks.read().await;
         let list = &buybacks[&(1, "Rica".to_string())];
         assert_eq!(list.len(), 1);
-        list[0].clone()
+        list[0].entry.clone()
     };
     assert_eq!(entry.price, 4_000);
     assert_eq!(entry.enchant, 2);
@@ -1427,7 +1427,9 @@ async fn sell_to_merchant_records_buyback_and_restores_item() {
         assert_eq!(bag[0].enchant, 2);
     }
     let buybacks = game_state.buybacks.read().await;
-    assert!(buybacks[&(1, "Rica".to_string())].is_empty());
+    assert!(buybacks
+        .get(&(1, "Rica".to_string()))
+        .is_none_or(|list| list.is_empty()));
 }
 
 #[tokio::test]
@@ -1446,7 +1448,7 @@ async fn buyback_rejects_without_enough_gold() {
         .await;
     let entry_id = {
         let buybacks = game_state.buybacks.read().await;
-        buybacks[&(1, "Rica".to_string())][0].entry_id
+        buybacks[&(1, "Rica".to_string())][0].entry.entry_id
     };
     {
         let mut gold = game_state.player_gold.write().await;
@@ -1494,6 +1496,74 @@ async fn buyback_list_keeps_only_the_newest_entries() {
     assert_eq!(buybacks[&(1, "Rica".to_string())].len(), 10);
 }
 
+/// Backdate every stored entry so it has already expired.
+async fn expire_all_buybacks(game_state: &GameState) {
+    let mut buybacks = game_state.buybacks.write().await;
+    for list in buybacks.values_mut() {
+        for stored in list.iter_mut() {
+            stored.expires_at_ms = 0;
+        }
+    }
+}
+
+#[tokio::test]
+async fn expired_buyback_entries_are_swept_with_their_pair() {
+    let game_state = make_test_game_state("buyback_expiry_sweep");
+    let (_buyer_rx, _npc_rx) = setup_haggle(&game_state, 10, 0).await;
+    {
+        let mut inventories = game_state.inventories.write().await;
+        let mut inv: onlinerpg_shared::inventory::PlayerInventory = Default::default();
+        inv.bag.push(bag_item(7, "iron_sword", 1));
+        inventories.insert(pid("buyer"), inv);
+    }
+    game_state
+        .sell_item(&pid("buyer"), &pid("npc_rica"), 7)
+        .await;
+    assert_eq!(game_state.buybacks.read().await.len(), 1);
+
+    expire_all_buybacks(&game_state).await;
+    // Opening the shop sweeps globally, so the whole pair goes — otherwise an
+    // offline character's entries would never be reached again.
+    game_state
+        .open_shop(&pid("buyer"), &pid("npc_rica"), true)
+        .await;
+    assert!(game_state.buybacks.read().await.is_empty());
+}
+
+#[tokio::test]
+async fn expired_buyback_cannot_be_repurchased() {
+    let game_state = make_test_game_state("buyback_expiry_reject");
+    let (_buyer_rx, _npc_rx) = setup_haggle(&game_state, 10, 0).await;
+    {
+        let mut inventories = game_state.inventories.write().await;
+        let mut inv: onlinerpg_shared::inventory::PlayerInventory = Default::default();
+        inv.bag.push(bag_item(7, "iron_sword", 1));
+        inventories.insert(pid("buyer"), inv);
+    }
+    game_state
+        .sell_item(&pid("buyer"), &pid("npc_rica"), 7)
+        .await;
+    let entry_id = {
+        let buybacks = game_state.buybacks.read().await;
+        buybacks[&(1, "Rica".to_string())][0].entry.entry_id
+    };
+    let gold_after_sell = game_state.get_player_gold(&pid("buyer")).await;
+
+    expire_all_buybacks(&game_state).await;
+    game_state
+        .buyback_item(&pid("buyer"), &pid("npc_rica"), entry_id)
+        .await;
+
+    // Rejected: no item restored and no gold taken.
+    assert_eq!(
+        game_state.get_player_gold(&pid("buyer")).await,
+        gold_after_sell
+    );
+    assert!(game_state.inventories.read().await[&pid("buyer")]
+        .bag
+        .is_empty());
+}
+
 #[tokio::test]
 async fn buyback_survives_a_reconnect() {
     let game_state = make_test_game_state("buyback_reconnect");
@@ -1509,7 +1579,7 @@ async fn buyback_survives_a_reconnect() {
         .await;
     let entry_id = {
         let buybacks = game_state.buybacks.read().await;
-        buybacks[&(1, "Rica".to_string())][0].entry_id
+        buybacks[&(1, "Rica".to_string())][0].entry.entry_id
     };
 
     // Disconnect: the session's player id and registration go away.
@@ -1563,7 +1633,7 @@ async fn buyback_after_haggled_sell_is_gold_neutral() {
     assert_eq!(game_state.get_player_gold(&pid("buyer")).await, 5_000);
     let entry_id = {
         let buybacks = game_state.buybacks.read().await;
-        let entry = &buybacks[&(1, "Rica".to_string())][0];
+        let entry = &buybacks[&(1, "Rica".to_string())][0].entry;
         assert_eq!(entry.price, 5_000);
         entry.entry_id
     };
@@ -1590,7 +1660,7 @@ async fn buyback_rejects_when_too_heavy_and_keeps_the_entry() {
         .await;
     let entry_id = {
         let buybacks = game_state.buybacks.read().await;
-        buybacks[&(1, "Rica".to_string())][0].entry_id
+        buybacks[&(1, "Rica".to_string())][0].entry.entry_id
     };
 
     // Fill the bag right up to the carry limit so the returning sword
@@ -1635,7 +1705,7 @@ async fn buyback_is_scoped_to_the_selling_character() {
         .await;
     let entry_id = {
         let buybacks = game_state.buybacks.read().await;
-        buybacks[&(1, "Rica".to_string())][0].entry_id
+        buybacks[&(1, "Rica".to_string())][0].entry.entry_id
     };
 
     // A different character (id 2) cannot take the seller's entry, even
