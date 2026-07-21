@@ -14,11 +14,22 @@ import {
   type PlayerState,
 } from '../utils/movementUtils'
 import { entityGroundY } from './entity-ground'
+import { shortestWrappedDeltaX } from '../terrain/world-wrap'
 import type { TerrainHeightManager } from './terrainHeightManager'
 
 // Use the same movement config as local player
 const MOVEMENT_CONFIG: MovementConfig = {
   ...DEFAULT_MOVEMENT_CONFIG,
+}
+
+/// Far enough that the player went somewhere, rather than the resting flush
+/// that lands on the spot they already stopped at.
+const PICKUP_CANCEL_DISTANCE = 0.2
+
+function movedFar(from: Position, to: Position): boolean {
+  const dx = shortestWrappedDeltaX(from.x, to.x)
+  const dz = to.z - from.z
+  return dx * dx + dz * dz > PICKUP_CANCEL_DISTANCE * PICKUP_CANCEL_DISTANCE
 }
 
 class PlayerStateManager {
@@ -336,6 +347,19 @@ class PlayerStateManager {
         rotation,
       })
       return
+    }
+
+    // The picker's own client drops the crouch the moment it moves, so a move
+    // that actually goes somewhere ends it here too — otherwise the remote
+    // stays frozen for the rest of a clip the picker already abandoned. Held
+    // poses (bench, forge) are left to their StopInteraction. The distance
+    // gate ignores the resting flush sent when the walk to the item ends.
+    if (
+      player?.state === 'interact' &&
+      player.interactionAnim === 'pickup' &&
+      movedFar(player.position, targetPosition)
+    ) {
+      this.handleStopInteraction(playerId)
     }
 
     this.targetPositions.set(playerId, { ...targetPosition })
