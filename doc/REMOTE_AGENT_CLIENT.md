@@ -319,6 +319,16 @@ Online: 12 (9 web, 1 cli, 2 npc)
 13. [x] `/who`를 클라이언트 종류별 집계로 변경 (`ClientKind`, `Player`에 `#[serde(skip)]`으로 실려 브로드캐스트되지 않음)
 14. [x] 배포물: `tools/package-agent-client.sh` / `.ps1` → 바이너리 + `data/` + 프로드용 config + [AGENT_CLIENT_QUICKSTART.md](AGENT_CLIENT_QUICKSTART.md)를 Linux tarball / Windows zip으로
 
+**패키징 메모**: `package-agent-client.ps1`은 `powershell.exe`(5.1)가 아니라 **`pwsh`(7)로 실행한다**. 5.1의 `Compress-Archive`는 zip 항목 경로를 역슬래시로 쓴다 (`...\data\config.toml`). ZIP 스펙(APPNOTE 4.4.17.1)은 슬래시를 요구하고, macOS·Linux 추출기나 파이썬 `zipfile`은 이걸 디렉터리가 아니라 이름에 역슬래시가 든 납작한 파일로 푼다 — 그러면 클라이언트가 `data/config.toml`을 못 찾는다. Windows 탐색기만 눈감아 준다. pwsh 7은 슬래시로 쓴다.
+
+```
+pwsh -NoProfile -Command "cd <repo>; $env:GOOGLE_CLI_CLIENT_SECRET=...; .\tools\package-agent-client.ps1"
+```
+
+실행 정책도 둘이 저장소가 따로다. 한쪽에서 `Set-ExecutionPolicy`를 해도 다른 쪽은 `Restricted`로 읽고 스크립트 로드를 거부한다.
+
+`PROTOCOL_VERSION`([`shared/src/lib.rs`](../shared/src/lib.rs))이 올라가면 기존 배포본은 `Protocol vN required`로 거절되므로, 서버 배포와 함께 새 릴리스를 올리고 인게임 공지에 재다운로드 안내를 넣는다.
+
 ## 운영·보안 고려사항
 
 - **개방 범위**: 이 기능이 켜지는 순간 "구글 계정만 있으면 누구나 상시 접속하는 에이전트를 돌릴 수 있다"가 된다. 원칙상 신청제·허용목록으로 좁히지 않는다 — 열 거면 다 연다
