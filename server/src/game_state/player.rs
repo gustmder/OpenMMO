@@ -430,7 +430,7 @@ impl super::GameState {
         player_id: &PlayerId,
         cmd: MoveCommand,
         trusted: bool,
-        is_npc: bool,
+        is_official_npc: bool,
     ) {
         let MoveCommand {
             position: mut new_position,
@@ -524,7 +524,7 @@ impl super::GameState {
             target: new_position,
             rotation: new_rotation,
             floor_level,
-            check_collision: !is_npc,
+            check_collision: !is_official_npc,
         });
     }
 

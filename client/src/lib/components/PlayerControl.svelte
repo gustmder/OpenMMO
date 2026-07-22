@@ -1142,7 +1142,7 @@
     const intent = processClickIntent(event)
     if (intent.type !== 'interact_npc') return
     const npc = get(gameStore).otherPlayers.get(intent.playerId)
-    if (!npc?.isNpc) return
+    if (!npc?.isOfficialNpc) return
 
     const caps = getNpcCapabilities(npc.name)
     const entries = [{ label: 'Talk', action: () => requestChatFocus() }]
@@ -1212,7 +1212,7 @@
       approachAndPickup,
       interactNpc: (intent) => {
         const npc = get(gameStore).otherPlayers.get(intent.playerId)
-        if (!npc?.isNpc) return
+        if (!npc?.isOfficialNpc) return
         // Click default per NPC kind: merchants open their shop, everyone
         // else starts a conversation. Right-click offers both explicitly.
         const caps = getNpcCapabilities(npc.name)

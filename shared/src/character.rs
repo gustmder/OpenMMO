@@ -71,6 +71,15 @@ impl CharacterClass {
         }
     }
 
+    /// Whether a player may create a character of this class. Merchant and
+    /// Guard belong to operator-run NPCs: Merchant's CHA +3 widens the
+    /// haggling band and Guard is a d10 hit die with STR/CON +2, so both are
+    /// balance decisions rather than security ones — the same rule applies to
+    /// human and agent players alike (`doc/REMOTE_AGENT_CLIENT.md`).
+    pub fn is_player_selectable(&self) -> bool {
+        !matches!(self, CharacterClass::Merchant | CharacterClass::Guard)
+    }
+
     pub fn hit_die(&self) -> u8 {
         match self {
             CharacterClass::Knight

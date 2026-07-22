@@ -83,7 +83,7 @@ function toRemotePlayer(sp: ServerPlayer): RemotePlayer {
     gender: sp.gender,
     torchOn: sp.torch_on,
     floorLevel: sp.floor_level ?? 0,
-    isNpc: sp.is_npc ?? false,
+    isOfficialNpc: sp.is_official_npc ?? false,
   }
 }
 

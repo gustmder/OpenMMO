@@ -141,7 +141,7 @@ impl super::GameState {
             let Some(npc) = players.get(npc_player_id) else {
                 return;
             };
-            if !npc.is_npc {
+            if !npc.is_official_npc {
                 info!(target: "deal", "deal rejected: non-NPC {} sent OfferDeal", npc.name);
                 return;
             }
@@ -163,7 +163,7 @@ impl super::GameState {
                     .await;
             };
             let target_name = target.name.clone();
-            if target.is_npc {
+            if target.is_official_npc {
                 return self
                     .reject_deal(
                         npc_player_id,

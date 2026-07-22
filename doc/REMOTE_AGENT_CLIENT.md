@@ -1,6 +1,6 @@
 # 원격 Agent Client (사용자 운용 LLM 에이전트)
 
-지금까지 agent-client는 게임 서버와 같은 머신에서, 운영자가 소유한 `npc_` 계정으로만 돌릴 수 있었다. 이 문서는 **외부 사용자가 자기 머신에서, 자기 구글 계정으로, 자기 LLM 구독으로 에이전트를 돌리는** 구조의 설계다. 2026-07-22 논의 결과이며 아직 구현 전이다.
+지금까지 agent-client는 게임 서버와 같은 머신에서, 운영자가 소유한 `npc_` 계정으로만 돌릴 수 있었다. 이 문서는 **외부 사용자가 자기 머신에서, 자기 구글 계정으로, 자기 LLM 구독으로 에이전트를 돌리는** 구조의 설계다. 2026-07-22 논의 결과이며, 아래 구현 계획의 Phase 0~3이 같은 날 반영되었다. 실행 방법은 [AGENT_CLIENT_QUICKSTART.md](AGENT_CLIENT_QUICKSTART.md).
 
 기존 NPC 운용(Rica, Karl) 설계는 [AGENT_CLIENT.md](AGENT_CLIENT.md), 거래·흥정 방어선은 [ECONOMY.md](ECONOMY.md) 참고.
 
@@ -22,7 +22,7 @@
 - **에이전트 전용 권한도 만들지 않는다.** 뒤집어 말하면 사용자 에이전트가 필요로 하는 추가 권한이 애초에 없다 — agent-client는 이미 평범한 플레이어 계정으로 다 돌아간다
 - **허용목록 같은 신원 기반 운영 수단은 성립하지 않는다.** 서버가 에이전트를 식별하지 않으므로 식별을 전제한 통제도 못 쓴다. 남용 대응은 **행동 기준**(과도한 메시지 빈도, 비정상 이동)으로 하고, 그 기준은 인간 클라이언트에도 똑같이 적용된다. 매크로를 돌리는 사람과 봇을 구분할 이유가 없다는 점에서 오히려 더 옳은 기준이다
 
-`is_npc`가 남아 있는 건 이 원칙의 예외가 아니다. 그건 "LLM이 조종함"이 아니라 **"운영자가 소유한 공식 NPC"** 라는 뜻이고, 사용자 에이전트는 여기에 해당하지 않는다 (아래 참조).
+`is_official_npc`가 남아 있는 건 이 원칙의 예외가 아니다. 그건 "LLM이 조종함"이 아니라 **"운영자가 소유한 공식 NPC"** 라는 뜻이고, 사용자 에이전트는 여기에 해당하지 않는다 (아래 참조).
 
 ## 요구사항과 결정 요약
 
@@ -308,13 +308,15 @@ Online: 12 (9 web, 1 cli, 2 npc)
 9. [x] agent-client: device flow(`google_auth.rs`), refresh token 캐시(`~/.config/onlinerpg/google.json`, 0600), 접속마다 ID 토큰 재발급
 10. [x] google 모드 제약 집행 (레지스트리 id 금지, 클래스 화이트리스트, character_name 필수, account 무시)
 
-**운영 메모**: CLI용 OAuth 클라이언트는 "TV 및 입력 제한 기기" 타입이어야 하고, 구글이 토큰 교환 때 **client_secret을 요구한다** (설치형 앱 시크릿이라 기밀은 아니지만 없으면 `invalid_request: Missing required parameter: client_secret`으로 거절된다). `[auth] client_secret` 또는 `GOOGLE_CLI_CLIENT_SECRET`에 넣는다. 기본 client_id는 `google_auth.rs`의 `DEFAULT_CLIENT_ID`에 박혀 있다.
+**운영 메모**: CLI용 OAuth 클라이언트는 "TV 및 입력 제한 기기" 타입이어야 하고, 구글이 토큰 교환 때 **client_secret을 요구한다** (없으면 `invalid_request: Missing required parameter: client_secret`). 기본 client_id는 `google_auth.rs`의 `DEFAULT_CLIENT_ID`에 박혀 있지만, **secret은 저장소에 두지 않는다** — 커밋하면 GitHub 푸시 보호가 막고, 시크릿 스캐너 경고가 계속 따라붙는다. 대신 배포물을 만들 때 `GOOGLE_CLI_CLIENT_SECRET` 환경변수에서 읽어 tarball의 `config.toml`에 써 넣는다 (`tools/package-agent-client.sh`). 사용자는 여전히 아무것도 입력하지 않는다.
 
-### Phase 3 — 서버 측 하드닝
-11. `CharacterClass::is_player_selectable()` + `CreateCharacter`/`RollCharacterStats` 검증
-12. `is_npc` → `is_official_npc` 개명 (호출부 31곳 + 웹 클라이언트 `isNpc`)
-13. `/who` 집계를 클라이언트 종류별로 변경 (Phase 0의 `client_kind` 사용)
-14. 배포물 만들기: 바이너리 + `data/` + `config.toml.example` + 사용 문서 (업데이트가 한 줄로 끝나게)
+값 자체는 기밀이 아니다 (설치형 앱은 비밀을 지킬 수 없다, RFC 8252 §8.5). 이걸로 얻을 수 있는 건 우리 앱 이름으로 동의 화면을 띄우는 것과 쿼터 소모 정도이고, 토큰을 받으려면 사람이 동의를 눌러야 하며 게임 서버는 ID 토큰의 `aud`/`sub`만 본다. 그럼에도 저장소 밖에 두는 이유는 보안이 아니라 **도구 마찰**이다.
+
+### Phase 3 — 서버 측 하드닝 — **완료 2026-07-22**
+11. [x] `CharacterClass::is_player_selectable()` + `CreateCharacter`/`RollCharacterStats` 검증 (agent-client도 같은 함수로 조기 검사)
+12. [x] `is_npc` → `is_official_npc` 개명 (Rust 호출부 + 웹 클라이언트 `isOfficialNpc`). 와이어 포맷은 위치 기반이라 프로토콜 버전은 그대로
+13. [x] `/who`를 클라이언트 종류별 집계로 변경 (`ClientKind`, `Player`에 `#[serde(skip)]`으로 실려 브로드캐스트되지 않음)
+14. [x] 배포물: `tools/package-agent-client.sh` → 바이너리 + `data/` + 프로드용 config + [AGENT_CLIENT_QUICKSTART.md](AGENT_CLIENT_QUICKSTART.md) 를 3.8 MB tarball로
 
 ## 운영·보안 고려사항
 

@@ -326,7 +326,7 @@ impl super::GameState {
             let radius_sq = super::EVENT_DELIVERY_RADIUS * super::EVENT_DELIVERY_RADIUS;
             let human_positions: Vec<_> = players
                 .values()
-                .filter(|p| !p.is_npc)
+                .filter(|p| !p.is_official_npc)
                 .map(|p| p.position)
                 .collect();
             players
@@ -336,7 +336,7 @@ impl super::GameState {
                     // ones (spawn validation is XZ-only and would place
                     // surface monsters right above the dungeon).
                     player.floor_level >= 0
-                        && (!player.is_npc
+                        && (!player.is_official_npc
                             || human_positions
                                 .iter()
                                 .any(|hp| player.position.dist_xz_sq(hp) <= radius_sq))

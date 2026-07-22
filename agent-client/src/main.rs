@@ -214,11 +214,6 @@ async fn main() -> anyhow::Result<()> {
     orchestrator::run_orchestrator(config.server, npcs, shared).await
 }
 
-/// Classes reserved for operator-run NPCs. Rejected here so a misconfigured
-/// run fails at startup with a readable message; the server enforces the same
-/// rule, which is what actually matters.
-const OPERATOR_ONLY_CLASSES: [&str; 2] = ["merchant", "guard"];
-
 /// Guard rails for `mode = "google"`: this client speaks for a person's own
 /// account, so it must not impersonate a registry NPC or take a class the
 /// game does not offer players (`doc/REMOTE_AGENT_CLIENT.md`).
@@ -231,7 +226,12 @@ fn check_google_mode_config(npcs: &[NpcConfig]) -> anyhow::Result<()> {
             );
         }
         if let Some(class) = &npc.character_class {
-            if OPERATOR_ONLY_CLASSES.contains(&class.as_str()) {
+            // Same rule the server enforces; checked here only so the mistake
+            // surfaces at startup instead of at character creation.
+            let parsed = class
+                .parse::<onlinerpg_shared::CharacterClass>()
+                .map_err(|_| anyhow::anyhow!("unknown character_class {class:?}"))?;
+            if !parsed.is_player_selectable() {
                 anyhow::bail!("character_class = \"{class}\" is not selectable by players");
             }
         }
@@ -435,7 +435,7 @@ token_cache = "/tmp/creds.json"
 
     #[test]
     fn google_mode_rejects_operator_only_classes() {
-        for class in OPERATOR_ONLY_CLASSES {
+        for class in ["merchant", "guard"] {
             let config = parse(&format!(
                 "{GOOGLE_BASE}\n[[npcs]]\ncharacter_name = \"A\"\ncharacter_class = \"{class}\"\n"
             ));

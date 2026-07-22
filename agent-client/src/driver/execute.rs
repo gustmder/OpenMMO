@@ -103,7 +103,7 @@ pub(super) async fn handle_response(
         } = action
         {
             let mut s = state.lock().await;
-            let Some((target_id, target_is_npc)) = s.resolve_nearby_player(player) else {
+            let Some((target_id, target_is_official_npc)) = s.resolve_nearby_player(player) else {
                 warn!("offer_deal: no nearby player named '{player}'");
                 s.push_agent_event(format!(
                     "[DealFailed] No player named '{player}' is nearby; the offer was not sent."
@@ -112,7 +112,7 @@ pub(super) async fn handle_response(
             };
             // The server rejects NPC targets anyway; refusing here keeps a
             // false "[DealResult]" exchange out of the LLM's context.
-            if target_is_npc {
+            if target_is_official_npc {
                 s.push_agent_event(format!(
                     "[DealFailed] {player} is an NPC — deals can only be offered to player \
                      travelers. Drop the subject."
@@ -142,7 +142,7 @@ pub(super) async fn handle_response(
         // TradeError event.
         if let AgentAction::OpenTrade { player } = action {
             let mut s = state.lock().await;
-            let Some((target_id, target_is_npc)) = s.resolve_nearby_player(player) else {
+            let Some((target_id, target_is_official_npc)) = s.resolve_nearby_player(player) else {
                 warn!("open_trade: no nearby player named '{player}'");
                 s.push_agent_event(format!(
                     "[TradeFailed] No player named '{player}' is nearby; no trade window was opened."
@@ -151,7 +151,7 @@ pub(super) async fn handle_response(
             };
             // The server rejects NPC targets anyway; refusing here avoids
             // pairing its TradeError with a false success event below.
-            if target_is_npc {
+            if target_is_official_npc {
                 s.push_agent_event(format!(
                     "[TradeFailed] {player} is an NPC — trade windows can only be opened for \
                      player travelers. Drop the subject."

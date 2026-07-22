@@ -210,7 +210,7 @@ impl SharedState {
         let radius_sq = NPC_SIGHT_RADIUS * NPC_SIGHT_RADIUS;
 
         self.nearby_players.iter().any(|(id, p)| {
-            if self_id == Some(id) || p.is_npc {
+            if self_id == Some(id) || p.is_official_npc {
                 return false;
             }
             p.position.dist_xz_sq(&self_player.position) <= radius_sq
@@ -386,7 +386,11 @@ impl SharedState {
             ServerMessage::ChatMessage { player_id, .. } => {
                 if self_id == Some(player_id) {
                     EventUrgency::Noise
-                } else if self.nearby_players.get(player_id).is_some_and(|p| p.is_npc) {
+                } else if self
+                    .nearby_players
+                    .get(player_id)
+                    .is_some_and(|p| p.is_official_npc)
+                {
                     EventUrgency::Routine
                 } else {
                     EventUrgency::Urgent
@@ -852,7 +856,7 @@ impl SharedState {
     }
 
     /// Resolve a player name (or raw id) among nearby players, as used by
-    /// player-targeting LLM actions. Returns `(player_id, is_npc)`.
+    /// player-targeting LLM actions. Returns `(player_id, is_official_npc)`.
     /// `name_or_id` stays `&str` because it comes straight from LLM output and
     /// may be either form; the resolved handle is what gets typed.
     pub fn resolve_nearby_player(&self, name_or_id: &str) -> Option<(PlayerId, bool)> {
@@ -862,7 +866,7 @@ impl SharedState {
                 p.name.eq_ignore_ascii_case(name_or_id)
                     || name_or_id.parse::<u64>().is_ok_and(|n| id.get() == n)
             })
-            .map(|(id, p)| (*id, p.is_npc))
+            .map(|(id, p)| (*id, p.is_official_npc))
     }
 
     /// Current game time snapshot for schedule resolution.

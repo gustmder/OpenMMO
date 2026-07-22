@@ -63,7 +63,7 @@ pub struct Player {
     #[serde(default)]
     pub gender: Gender,
     #[serde(default)]
-    pub is_npc: bool,
+    pub is_official_npc: bool,
     #[serde(default)]
     pub torch_on: bool,
     #[serde(default)]
@@ -77,6 +77,47 @@ pub struct Player {
     pub object_id: Option<u32>,
     #[serde(skip)]
     pub last_combat_at: u64,
+    /// Which program drives this player, from the `ClientInfo` handshake.
+    /// Deliberately never serialized: it feeds the `/who` totals only, and
+    /// broadcasting it would let clients label individual players.
+    #[serde(skip)]
+    pub client_kind: ClientKind,
+}
+
+/// Client program on the other end of a connection. Self-reported, so it may
+/// only ever inform counts — never permissions, or clients would have a
+/// reason to lie (`doc/REMOTE_AGENT_CLIENT.md`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClientKind {
+    /// Never sent a handshake (only reachable for players created in tests).
+    #[default]
+    Unknown,
+    /// Browser client.
+    Web,
+    /// agent-client.
+    Cli,
+    Other,
+}
+
+impl ClientKind {
+    /// Map the handshake string onto the known set, so a hostile client
+    /// cannot invent labels.
+    pub fn from_reported(reported: &str) -> Self {
+        match reported {
+            "web" => ClientKind::Web,
+            "cli" => ClientKind::Cli,
+            _ => ClientKind::Other,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ClientKind::Unknown => "unknown",
+            ClientKind::Web => "web",
+            ClientKind::Cli => "cli",
+            ClientKind::Other => "other",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,12 +252,13 @@ mod tests {
             max_health: 5,
             class: CharacterClass::Knight,
             gender: Gender::default(),
-            is_npc: false,
+            is_official_npc: false,
             torch_on: false,
             floor_level: 0,
             object_type: None,
             object_id: None,
             last_combat_at: 0,
+            client_kind: ClientKind::default(),
         };
         // rmp_serde writes the struct as a positional array, so `id` is the
         // first element — and 42 fits msgpack's single-byte positive fixint.
@@ -245,12 +287,13 @@ mod tests {
             max_health: 17,
             class: CharacterClass::Knight,
             gender: Gender::default(),
-            is_npc: false,
+            is_official_npc: false,
             torch_on: true,
             floor_level: 0,
             object_type: None,
             object_id: None,
             last_combat_at: 0,
+            client_kind: ClientKind::default(),
         };
         let bytes = rmp_serde::to_vec(&player).unwrap();
         let decoded: Player = rmp_serde::from_slice(&bytes).unwrap();

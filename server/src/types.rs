@@ -1,3 +1,4 @@
+pub use onlinerpg_shared::entity::ClientKind;
 pub use onlinerpg_shared::{
     Character, CharacterAttributes, CharacterClass, ClientMessage, GameDateTime, Gender, Monster,
     MonsterState, Player, PlayerId, Position, ServerMessage,
@@ -26,7 +27,8 @@ pub fn new_player(
     gender: Gender,
     position: Position,
     rotation: f32,
-    is_npc: bool,
+    is_official_npc: bool,
+    client_kind: ClientKind,
 ) -> Player {
     Player {
         id: next_player_id(),
@@ -38,11 +40,12 @@ pub fn new_player(
         max_health,
         class,
         gender,
-        is_npc,
+        is_official_npc,
         torch_on: false,
         floor_level: 0,
         object_type: None,
         object_id: None,
         last_combat_at: 0,
+        client_kind,
     }
 }

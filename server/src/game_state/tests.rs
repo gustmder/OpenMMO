@@ -2,7 +2,9 @@ use super::*;
 use crate::housing::HousingIO;
 use crate::item_defs::ItemDefs;
 use crate::monster_defs::MonsterDefs;
-use crate::types::{CharacterClass, Gender, MonsterState, PlayerId, Position, ServerMessage};
+use crate::types::{
+    CharacterClass, ClientKind, Gender, MonsterState, PlayerId, Position, ServerMessage,
+};
 use crate::world_config::world_config;
 use onlinerpg_shared::inventory::{EquipSlot, GroundItem, ItemInstance, PlayerInventory};
 use onlinerpg_shared::messages::DealKind;
@@ -41,12 +43,13 @@ fn make_player(id: &str, x: f32, z: f32) -> Player {
         max_health: 10,
         class: CharacterClass::Knight,
         gender: Gender::default(),
-        is_npc: false,
+        is_official_npc: false,
         torch_on: false,
         floor_level: 0,
         object_type: None,
         object_id: None,
         last_combat_at: 0,
+        client_kind: Default::default(),
     }
 }
 
@@ -143,12 +146,13 @@ async fn respawn_player_revives_dead_player_only() {
         max_health: 30,
         class: CharacterClass::Knight,
         gender: Gender::default(),
-        is_npc: false,
+        is_official_npc: false,
         torch_on: false,
         floor_level: 0,
         object_type: None,
         object_id: None,
         last_combat_at: 0,
+        client_kind: Default::default(),
     };
     let player_id = player.id;
     game_state.add_player(player).await;
@@ -205,12 +209,13 @@ async fn respawn_player_ignores_alive_player() {
         max_health: 20,
         class: CharacterClass::Knight,
         gender: Gender::default(),
-        is_npc: false,
+        is_official_npc: false,
         torch_on: false,
         floor_level: 0,
         object_type: None,
         object_id: None,
         last_combat_at: 0,
+        client_kind: Default::default(),
     };
     let player_id = player.id;
     game_state.add_player(player).await;
@@ -305,12 +310,15 @@ async fn who_command_reports_online_counts_only_to_the_requester() {
     let game_state = make_test_game_state("who_command");
     let asker_id = pid("asker");
     let bystander_id = pid("bystander");
-    game_state.add_player(make_player("asker", 0.0, 0.0)).await;
-    game_state
-        .add_player(make_player("bystander", 5.0, 0.0))
-        .await;
+    let mut asker = make_player("asker", 0.0, 0.0);
+    asker.client_kind = ClientKind::Web;
+    game_state.add_player(asker).await;
+    let mut bystander = make_player("bystander", 5.0, 0.0);
+    bystander.client_kind = ClientKind::Cli;
+    game_state.add_player(bystander).await;
     let mut npc = make_player("npc_karl", 10.0, 0.0);
-    npc.is_npc = true;
+    npc.is_official_npc = true;
+    npc.client_kind = ClientKind::Cli;
     game_state.add_player(npc).await;
 
     let mut asker_rx = game_state.register_direct_channel(&asker_id).await;
@@ -323,7 +331,7 @@ async fn who_command_reports_online_counts_only_to_the_requester() {
     match asker_rx.try_recv() {
         Ok(ServerMessage::ChatMessage { player_id, message }) => {
             assert_eq!(player_id, asker_id);
-            assert_eq!(message, "Online: 3 (2 human, 1 NPC)");
+            assert_eq!(message, "Online: 3 (1 web, 1 cli, 1 npc)");
         }
         other => panic!("Expected online count reply, got {:?}", other),
     }
@@ -1419,7 +1427,7 @@ async fn pickup_animation_is_not_sent_beyond_the_delivery_radius() {
 fn make_merchant_npc(id: &str, x: f32, z: f32) -> Player {
     let mut p = make_player(id, x, z);
     p.name = "Rica".to_string();
-    p.is_npc = true;
+    p.is_official_npc = true;
     p
 }
 
@@ -2054,7 +2062,7 @@ async fn buyback_is_scoped_to_the_selling_character() {
 fn make_resident_npc(id: &str, x: f32, z: f32) -> Player {
     let mut p = make_player(id, x, z);
     p.name = "Karl".to_string();
-    p.is_npc = true;
+    p.is_official_npc = true;
     p
 }
 
@@ -2336,7 +2344,7 @@ async fn open_trade_pushes_shop_state_to_the_player() {
         .add_player({
             let mut p = make_player("npc_nobody", 0.5, 0.0);
             p.name = "Nobody".to_string();
-            p.is_npc = true;
+            p.is_official_npc = true;
             p
         })
         .await;

@@ -455,7 +455,7 @@
         maxHealth={player.maxHealth}
         torchOn={player.torchOn}
         {torchEffectsDisabled}
-        npcPlayerId={player.isNpc ? player.id : undefined}
+        npcPlayerId={player.isOfficialNpc ? player.id : undefined}
         onInteractionFinished={() =>
           remotePlayerManager.handleStopInteraction(player.id)}
       />

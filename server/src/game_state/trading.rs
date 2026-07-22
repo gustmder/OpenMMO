@@ -158,7 +158,7 @@ impl super::GameState {
         let player = players.get(player_id).ok_or("Player not found")?;
         let npc = players.get(npc_player_id).ok_or("Trader not found")?;
 
-        if !npc.is_npc {
+        if !npc.is_official_npc {
             return Err("That character is not a trader");
         }
         let def = trader_def_by_name(&npc.name).ok_or("This NPC does not trade")?;
@@ -218,12 +218,12 @@ impl super::GameState {
         let valid = {
             let players = self.players.read().await;
             match (players.get(npc_player_id), players.get(target_player_id)) {
-                (Some(npc), _) if !npc.is_npc => Err("only NPCs can push trade windows"),
+                (Some(npc), _) if !npc.is_official_npc => Err("only NPCs can push trade windows"),
                 (Some(npc), _) if trader_def_by_name(&npc.name).is_none() => {
                     Err("you have nothing to trade with")
                 }
                 (Some(_), None) => Err("that player is not here"),
-                (Some(_), Some(target)) if target.is_npc => {
+                (Some(_), Some(target)) if target.is_official_npc => {
                     Err("trade windows can only be opened for players")
                 }
                 (Some(npc), Some(target)) => {

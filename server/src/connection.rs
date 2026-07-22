@@ -4,8 +4,8 @@ use crate::game::character_hp::{level_one_max_hp, DEFAULT_CHARACTER_RACE};
 use crate::game_state::GameState;
 use crate::google_auth::GoogleAuthVerifier;
 use crate::types::{
-    new_player, Character, CharacterAttributes, CharacterClass, ClientMessage, PlayerId, Position,
-    ServerMessage,
+    new_player, Character, CharacterAttributes, CharacterClass, ClientKind, ClientMessage,
+    PlayerId, Position, ServerMessage,
 };
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
@@ -73,9 +73,9 @@ const UNAUTH_MAX_MESSAGE_BYTES: usize = 8 * 1024;
 const UNAUTH_MAX_MESSAGES: u32 = 30;
 
 struct ConnectionState {
-    /// Client program reported in `ClientInfo` ("web" / "cli"). `None` until
-    /// the handshake arrives, which is what gates every other message.
-    client_kind: Option<String>,
+    /// Client program reported in `ClientInfo`. `None` until the handshake
+    /// arrives, which is what gates every other message.
+    client_kind: Option<ClientKind>,
     /// Set when the connection must be dropped right after its pending
     /// responses are flushed (protocol mismatch).
     must_close: bool,
@@ -88,7 +88,7 @@ struct ConnectionState {
     pending_character_attributes: Option<CharacterAttributes>,
     connected_at: std::time::Instant,
     last_heartbeat: std::time::Instant,
-    is_npc: bool,
+    is_official_npc: bool,
     /// Account email is on the admin allowlist.
     admin_eligible: bool,
     /// admin_eligible && the entered character's admin_role > 0.
@@ -107,7 +107,7 @@ impl ConnectionState {
             pending_character_attributes: None,
             connected_at: std::time::Instant::now(),
             last_heartbeat: std::time::Instant::now(),
-            is_npc: false,
+            is_official_npc: false,
             admin_eligible: false,
             is_admin: false,
         }
@@ -123,6 +123,22 @@ impl ConnectionState {
                 }])
             }
         }
+    }
+
+    /// Merchant and Guard are reserved for operator-run NPCs. The web client
+    /// simply does not offer them, so this catches hand-rolled clients —
+    /// agent-clients included, which is the point.
+    fn require_selectable_class(&self, class: &CharacterClass) -> Result<(), Vec<ServerMessage>> {
+        if self.is_official_npc || class.is_player_selectable() {
+            return Ok(());
+        }
+        warn!(
+            "Rejected {:?} character for account {:?}: class is operator-only",
+            class, self.account_name
+        );
+        Err(vec![ServerMessage::CharacterError {
+            message: format!("The {} class is not available", class.as_str()),
+        }])
     }
 
     fn require_not_in_game(&self, action: &str) -> Result<(), Vec<ServerMessage>> {
@@ -320,7 +336,7 @@ fn finish_auth(
     auth_service: &AuthService,
     state: &mut ConnectionState,
     account_name: String,
-    is_npc: bool,
+    is_official_npc: bool,
 ) -> Vec<ServerMessage> {
     let character_records = match auth_service.list_characters(&account_name) {
         Ok(characters) => characters,
@@ -341,7 +357,7 @@ fn finish_auth(
         .collect::<Vec<Character>>();
 
     state.account_name = Some(account_name.clone());
-    state.is_npc = is_npc;
+    state.is_official_npc = is_official_npc;
     state.pending_character_attributes = None;
 
     info!(
@@ -371,16 +387,6 @@ fn requires_admin(msg: &ClientMessage) -> bool {
 /// Where to point a refused client. Kept in the rejection text because that
 /// message is the only thing an outdated agent-client can still show.
 const CLIENT_UPDATE_HINT: &str = "update your client (https://github.com/Julian-adv/OnlineRPG)";
-
-/// Known client programs; anything else is bucketed so a hostile client
-/// cannot make the `/who` breakdown grow unbounded labels.
-fn normalize_client_kind(reported: &str) -> &'static str {
-    match reported {
-        "web" => "web",
-        "cli" => "cli",
-        _ => "other",
-    }
-}
 
 /// Protocol handshake gate, run before every other message.
 ///
@@ -421,9 +427,12 @@ fn handle_handshake(
                 ),
             }]);
         }
-        let kind = normalize_client_kind(client_kind);
-        info!("Client handshake: kind={kind} version={client_version}");
-        state.client_kind = Some(kind.to_string());
+        let kind = ClientKind::from_reported(client_kind);
+        info!(
+            "Client handshake: kind={} version={client_version}",
+            kind.as_str()
+        );
+        state.client_kind = Some(kind);
         return Some(vec![]);
     }
 
@@ -545,6 +554,9 @@ async fn handle_client_message(
                 Ok(name) => name,
                 Err(responses) => return Ok(responses),
             };
+            if let Err(responses) = state.require_selectable_class(&character_class) {
+                return Ok(responses);
+            }
 
             let Some(rolled_attributes) = state.pending_character_attributes.clone() else {
                 warn!(
@@ -626,6 +638,9 @@ async fn handle_client_message(
             if let Err(responses) = state.require_auth("RollCharacterStats") {
                 return Ok(responses);
             }
+            if let Err(responses) = state.require_selectable_class(&character_class) {
+                return Ok(responses);
+            }
 
             let attributes = roll_character_attributes(&character_class, gender);
             let max_hp = default_character_max_hp(&attributes, &character_class);
@@ -689,7 +704,8 @@ async fn handle_client_message(
                     z: selected_character.last_z,
                 },
                 selected_character.last_rotation,
-                state.is_npc,
+                state.is_official_npc,
+                state.client_kind.unwrap_or_default(),
             );
 
             // Restore saved health (if available) and floor_level from DB
@@ -802,7 +818,7 @@ async fn handle_client_message(
                             append,
                         },
                         state.is_admin,
-                        state.is_npc,
+                        state.is_official_npc,
                     )
                     .await;
             } else {
@@ -1281,7 +1297,7 @@ mod tests {
         );
 
         assert!(responses.is_some_and(|r| r.is_empty()));
-        assert_eq!(state.client_kind.as_deref(), Some("cli"));
+        assert_eq!(state.client_kind, Some(ClientKind::Cli));
         assert!(!state.must_close);
         // Later messages pass through once the handshake is done.
         assert!(handle_handshake(&ClientMessage::Heartbeat, &mut state).is_none());
@@ -1325,7 +1341,27 @@ mod tests {
             &mut state,
         );
 
-        assert_eq!(state.client_kind.as_deref(), Some("other"));
+        assert_eq!(state.client_kind, Some(ClientKind::Other));
+    }
+
+    #[test]
+    fn operator_only_classes_are_refused_for_players() {
+        let mut state = ConnectionState::new();
+        assert!(state
+            .require_selectable_class(&CharacterClass::Merchant)
+            .is_err());
+        assert!(state
+            .require_selectable_class(&CharacterClass::Guard)
+            .is_err());
+        assert!(state
+            .require_selectable_class(&CharacterClass::Ranger)
+            .is_ok());
+
+        // Operator NPCs are exactly who those classes exist for.
+        state.is_official_npc = true;
+        assert!(state
+            .require_selectable_class(&CharacterClass::Merchant)
+            .is_ok());
     }
 
     #[test]

@@ -1,6 +1,46 @@
-use crate::types::{PlayerId, ServerMessage};
+use crate::types::{ClientKind, Player, PlayerId, ServerMessage};
 use crate::world_config::world_config;
 use tracing::{info, warn};
+
+/// `/who` breakdown. Splits by client program rather than by "human vs bot":
+/// the server cannot tell whether a person or an LLM is driving a web client,
+/// and does not try to (`doc/REMOTE_AGENT_CLIENT.md`). Official NPCs are
+/// counted separately because that one the server does know for certain.
+#[derive(Default)]
+struct OnlineCounts {
+    web: u32,
+    cli: u32,
+    other: u32,
+    official_npc: u32,
+}
+
+impl OnlineCounts {
+    fn tally<'a>(players: impl Iterator<Item = &'a Player>) -> Self {
+        let mut counts = Self::default();
+        for player in players {
+            if player.is_official_npc {
+                counts.official_npc += 1;
+                continue;
+            }
+            match player.client_kind {
+                ClientKind::Web => counts.web += 1,
+                ClientKind::Cli => counts.cli += 1,
+                ClientKind::Other | ClientKind::Unknown => counts.other += 1,
+            }
+        }
+        counts
+    }
+
+    fn describe(&self) -> String {
+        let total = self.web + self.cli + self.other + self.official_npc;
+        let mut parts = vec![format!("{} web", self.web), format!("{} cli", self.cli)];
+        if self.other > 0 {
+            parts.push(format!("{} other", self.other));
+        }
+        parts.push(format!("{} npc", self.official_npc));
+        format!("Online: {total} ({})", parts.join(", "))
+    }
+}
 
 impl super::GameState {
     pub async fn send_chat_message(&self, player_id: &PlayerId, message: String) {
@@ -10,22 +50,15 @@ impl super::GameState {
         }
 
         if message.trim() == "/who" {
-            let (humans, npcs) =
-                {
-                    let players = self.players.read().await;
-                    players.values().fold((0u32, 0u32), |(h, n), p| {
-                        if p.is_npc {
-                            (h, n + 1)
-                        } else {
-                            (h + 1, n)
-                        }
-                    })
-                };
+            let counts = {
+                let players = self.players.read().await;
+                OnlineCounts::tally(players.values())
+            };
             self.send_direct_message(
                 player_id,
                 ServerMessage::ChatMessage {
                     player_id: *player_id,
-                    message: format!("Online: {} ({} human, {} NPC)", humans + npcs, humans, npcs),
+                    message: counts.describe(),
                 },
             )
             .await;

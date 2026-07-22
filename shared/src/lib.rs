@@ -104,12 +104,13 @@ mod tests {
             max_health: 10,
             class: CharacterClass::Knight,
             gender: Gender::default(),
-            is_npc: false,
+            is_official_npc: false,
             torch_on: false,
             floor_level: 0,
             object_type: None,
             object_id: None,
             last_combat_at: 0,
+            client_kind: Default::default(),
         }];
         // A monster with every Option None guards the wire format itself:
         // rmp_serde encodes structs as positional arrays, so any field that
@@ -192,6 +193,19 @@ mod tests {
         assert!("".parse::<CharacterClass>().is_err());
         assert!("nonexistent".parse::<CharacterClass>().is_err());
         assert!("Knight".parse::<CharacterClass>().is_err());
+    }
+
+    #[test]
+    fn only_operator_classes_are_unselectable() {
+        for class in ALL_CLASSES {
+            let expected = !matches!(class, CharacterClass::Merchant | CharacterClass::Guard);
+            assert_eq!(
+                class.is_player_selectable(),
+                expected,
+                "{} selectability",
+                class.as_str()
+            );
+        }
     }
 
     #[test]

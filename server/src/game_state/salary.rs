@@ -33,7 +33,7 @@ impl super::GameState {
             let players = self.players.read().await;
             players
                 .values()
-                .filter(|p| p.is_npc)
+                .filter(|p| p.is_official_npc)
                 .filter_map(|p| {
                     npc_defs()
                         .get_trader_by_npc_name(&p.name)
