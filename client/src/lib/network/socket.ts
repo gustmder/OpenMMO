@@ -325,9 +325,7 @@ class NetworkManager {
   }
 
   requestRespawn() {
-    if (this.isConnected()) {
-      const bytes = serializeClientMessage('RequestRespawn')
-      this.socket!.send(bytes)
+    if (this.sendAndSerialize('RequestRespawn')) {
       this.respawnRequested.emit()
     }
   }
