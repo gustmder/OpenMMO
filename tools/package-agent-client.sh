@@ -8,7 +8,9 @@ set -euo pipefail
 
 REPO=${REPO:-$(cd "$(dirname "$0")/.." && pwd)}
 OUT_DIR=${OUT_DIR:-$REPO/dist}
-SERVER=${SERVER:-wss://openmmo.to.nexus}
+# Host only: the WebSocket lives at /ws (the reverse proxy upgrades that path
+# and serves the game page at /), and the tile API at /api/terrain.
+HOST=${HOST:-openmmo.to.nexus}
 
 # Google's device flow requires the installed-app secret in the token
 # exchange. It is not confidential (RFC 8252 section 8.5) and every shipped
@@ -39,8 +41,8 @@ cp agent-client/data/system_prompt.txt agent-client/data/animation_durations.jso
 # Registry NPC personas are operator-side; a user agent plays its own character.
 cat > "$stage/data/config.toml" <<EOF
 # agent-client configuration. Run the binary from this directory.
-server = "$SERVER"
-terrain = "${SERVER/wss:/https:}"
+server = "wss://$HOST/ws"
+terrain = "https://$HOST"
 
 [auth]
 mode = "google"

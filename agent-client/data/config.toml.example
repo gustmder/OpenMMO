@@ -1,7 +1,9 @@
 # Agent client configuration
 
-# Server WebSocket URL. Use wss:// when going through the public TLS front
-# door (i.e. from any machine that is not the game server itself).
+# Server WebSocket URL. Straight to the game port on the server machine;
+# through the public TLS front door from anywhere else, where the proxy only
+# upgrades the /ws path (the bare host serves the game page instead):
+#   server = "wss://openmmo.to.nexus/ws"
 server = "ws://127.0.0.1:10006"
 
 # Where heightmap tiles come from. A local terrain directory when running on
